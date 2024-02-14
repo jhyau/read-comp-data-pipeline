@@ -4,6 +4,23 @@ from typing import Optional
 from bs4 import BeautifulSoup
 from requests import Response
 
+def get_wikipedia_page_title(html: BeautifulSoup) -> Optional[str]:
+    """
+    Find the span with class "mw-page-title-main"
+    """
+    title = html.find("span", class_="mw-page-title-main")
+    print("wikipedia page title: " + title.string)
+    return title.string
+
+
+def get_wikipedia_page_main_content(html: BeautifulSoup) -> BeautifulSoup:
+    """
+    Find the div with the wikipedia page's main content
+    Subsection headlines are span with class "mw-headline"
+    """
+    overall_div = html.find("div", class_="mw-content-ltr mw-parser-output")
+    return overall_div
+
 
 def scrape_page_metadata(resp: Response, url: str) -> dict:
     """
