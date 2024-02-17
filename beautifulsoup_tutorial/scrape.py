@@ -4,22 +4,43 @@ from typing import Optional
 from bs4 import BeautifulSoup
 from requests import Response
 
+
+def get_wikipedia_first_heading(html: BeautifulSoup) -> Optional[str]:
+    """
+    If page title doesn't exist, look for first heading instead
+    NOTE: Sometimes .string returns empty if there are more children tags, use get_text() instead
+    """
+    heading = html.find("h1", id="firstHeading")
+    if heading is not None and heading != -1:
+        print("wikipedia first heading since page title doesn't exist: " + heading.get_text())
+        return heading.get_text()
+    else:
+        return None
+
+
 def get_wikipedia_page_title(html: BeautifulSoup) -> Optional[str]:
     """
     Find the span with class "mw-page-title-main"
     """
     title = html.find("span", class_="mw-page-title-main")
-    print("wikipedia page title: " + title.string)
-    return title.string
+    if title is not None and title != -1:
+        print("wikipedia page title: " + title.get_text())
+        return title.string
+    else:
+        return None
 
 
-def get_wikipedia_page_main_content(html: BeautifulSoup) -> BeautifulSoup:
+def get_wikipedia_page_main_content(html: BeautifulSoup) -> Optional[BeautifulSoup]:
     """
     Find the div with the wikipedia page's main content
     Subsection headlines are span with class "mw-headline"
+    Returns None if the corresponding class is not found
     """
     overall_div = html.find("div", class_="mw-content-ltr mw-parser-output")
-    return overall_div
+    if overall_div is not None and overall_div != -1:
+        return overall_div
+    else:
+        return None
 
 
 def scrape_page_metadata(resp: Response, url: str) -> dict:
