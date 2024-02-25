@@ -1,8 +1,9 @@
+import argparse
 import io
 from typing import Optional
 
 from beautifulsoup_tutorial.fetch import fetch_html_from_url
-from beautifulsoup_tutorial.scrape import scrape_page_metadata, get_wikipedia_page_title, get_wikipedia_page_main_content, get_wikipedia_first_heading
+from beautifulsoup_tutorial.scrape import *
 
 from bs4 import BeautifulSoup
 
@@ -10,6 +11,14 @@ URL = "https://en.wikipedia.org/wiki/List_of_areas_of_law"
 REDIRECTING_URL = "https://en.wikipedia.org/wiki/Corporate_compliance_law"
 ANOTHER_URL = "https://en.wikipedia.org/wiki/Category:Corporate_law"
 BASE_URL = "https://en.wikipedia.org"
+
+
+def prepare_full_url(href: str) -> str:
+	if href.startswith("/"):
+		full_url = remove_pound_from_urls(BASE_URL + href)
+	else:
+		full_url = remove_pound_from_urls(href)
+	return full_url
 
 
 def is_href_in_neighbors(href: str, neighbors: list):
@@ -28,8 +37,11 @@ def identify_redirecting_urls(seen_urls: list, resp: Optional[str]):
 			full_url = BASE_URL + href
 		else:
 			full_url = href
-		if remove_pound_from_urls(resp.url) == full_url:
+		compare = remove_pound_from_urls(resp.url)
+		if compare == full_url or full_url.startswith(compare):
 			print("*****Detected redirected url*********")
+			print("full_url: ", full_url)
+			print("resp.url: ", resp.url)
 			return True
 	return False
 
@@ -39,7 +51,7 @@ def remove_pound_from_urls(url: str):
 	If the url has a pound sign to point to a specific section of a page, remove that pound sign
 	and just save the main page url
 	"""
-	pound = url.find("#") 
+	pound = url.find("#")
 	if (pound != -1):
 		return url[:pound]
 	else:
@@ -49,8 +61,26 @@ def remove_pound_from_urls(url: str):
 def filter_wikipedia_a_links(a: BeautifulSoup):
 	# Ignore a tags that don't have href
 	# Ignore "edit" urls and urls that point to part of the same page with "#"
+	# Ignore "improve this article" links
+	# Ignore urls with "File" that usually points to some asset like an image
+	# Ignore any urls that end with ".svg" or ".jpg", which are images
+	# Ignore urls that are about contributing to wikipedia, "Wikipedia:"
+	# Ignore template pages, "Template:"
 	# TODO: for now, ignore non-wikipedia urls
-	return a.has_attr("href") and a.get_text().find("edit") == -1 and not a["href"].startswith("#") and not (a["href"].startswith("http") and a["href"].find("wikipedia") == -1)
+	return a.has_attr("href") and a.get_text().lower().find("edit") == -1 \
+	and a.get_text().lower().find("improve this article") == -1 \
+	and a["href"].find("File:") == -1 \
+	and a["href"].find("Wikipedia:") == -1 \
+	and a["href"].find("Template:") == -1 \
+	and not a["href"].endswith(".svg") \
+	and not a["href"].endswith(".jpg") \
+	and not a["href"].endswith(".png") \
+	and not a["href"].endswith(".js") \
+	and not a["href"].endswith(".mp3") \
+	and not a["href"].endswith(".mp4") \
+	and not a["href"].startswith("#") \
+	and a["href"].lower().find("edit") == -1 \
+	and not (a["href"].startswith("http") and a["href"].find("wikipedia.org") == -1)
 
 
 def explore_page(name: str, href: str, seen_urls: list, writer: io.TextIOWrapper):
@@ -59,10 +89,7 @@ def explore_page(name: str, href: str, seen_urls: list, writer: io.TextIOWrapper
 	Prevent duplicates by verifying it's not in the seen_urls list
 	"""
 	# Load the web page
-	if href.startswith("/"):
-		full_url = remove_pound_from_urls(BASE_URL + href)
-	else:
-		full_url = remove_pound_from_urls(href)
+	full_url = prepare_full_url(href)
 	response = fetch_html_from_url(full_url)
 	html = BeautifulSoup(response.content, "html.parser")
 
@@ -73,6 +100,7 @@ def explore_page(name: str, href: str, seen_urls: list, writer: io.TextIOWrapper
 	# Mark this url as seen
 	seen_urls.append(href)
 	print("Exploring url: ", full_url)
+	print("seen urls list: ", seen_urls)
 
 	# Get the wikipedia page visible title
 	title = get_wikipedia_page_title(html)
@@ -80,9 +108,27 @@ def explore_page(name: str, href: str, seen_urls: list, writer: io.TextIOWrapper
 		title = get_wikipedia_first_heading(html)
 	# Get the main content div
 	overall_div = get_wikipedia_page_main_content(html)
+	# TODO: handle when overall_div is None
+	if overall_div is None:
+		overall_div = get_wikipedia_body_content(html)
+
+	# If the page doesn't ever mention "law" or "legal", then treat as unrelated content and skip the page
+	# Note that sometimes some things are in b tag for bold...
+	# Retrieve all visible text from the page
+	containsLaw = False
+	visible_text = text_from_html(response.content)
+	# print("=============visible text==============")
+	# print(visible_text)
+	if visible_text.lower().find("law") != -1 or visible_text.lower().find("legal") != -1 \
+	or visible_text.lower().find("statute") != -1 \
+	or visible_text.lower().find("legislative") != -1:
+		containsLaw = True
+	
+	if not containsLaw:
+		print(f"Does not contain law or legal content: {full_url} \n")
+		return
 
 	# Extract all the content on the page
-	# If the page doesn't ever mention "law" or "legal", then treat as unrelated content and skip the page
 
 	# ul for bulleted unordered list, ol for ordered list, dl for description list
 	# Go through all children in the overall_div
@@ -118,7 +164,15 @@ def explore_page(name: str, href: str, seen_urls: list, writer: io.TextIOWrapper
 
 
 def starting_run():
-	resp = fetch_html_from_url(URL)
+	parser = argparse.ArgumentParser(description='Pass in starting URL for wikipedia law scraping')
+	parser.add_argument('--url', default=URL, type=str,
+	                    help='wikipedia URL to start scraping for law/legal content ')
+	# parser.add_argument('--sum', dest='accumulate', action='store_const',
+	#                     const=sum, default=max,
+	#                     help='sum the integers (default: find the max)')
+	args = parser.parse_args()
+
+	resp = fetch_html_from_url(args.url)
 	html = BeautifulSoup(resp.content, "html.parser")
 	# Get the wikipedia page visible title
 	title = get_wikipedia_page_title(html)
@@ -128,9 +182,9 @@ def starting_run():
 	overall_div = get_wikipedia_page_main_content(html)
 
 	# Finding all p tags within the div
-	overall_p = overall_div.find_all("p")
-	for p in overall_p:
-		print(p.get_text())
+	# overall_p = overall_div.find_all("p")
+	# for p in overall_p:
+	# 	print(p.get_text())
 	# headline = html.find("span", class_="mw-headline")
 	# print("headline: " + headline.string)
 
@@ -166,6 +220,7 @@ def starting_run():
 		# seen_urls.append(url)
 		# response = fetch_html_from_url(BASE_URL + url[1])
 		# page_html = BeautifulSoup(response.content, "html.parser")
+		print("From starting page, exploring url: ", url)
 		explore_page(url[0], url[1], seen_urls, writer)
 
 	# Close the writer

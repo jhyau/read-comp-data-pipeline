@@ -1,8 +1,22 @@
 """Scrape metadata attributes from a requested URL."""
 from typing import Optional
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 from requests import Response
+
+def tag_visible(element):
+    if element.parent.name in ['style', 'script', 'head', 'title', 'meta', '[document]']:
+        return False
+    if isinstance(element, Comment):
+        return False
+    return True
+
+
+def text_from_html(body):
+    soup = BeautifulSoup(body, 'html.parser')
+    texts = soup.findAll(text=True)
+    visible_texts = filter(tag_visible, texts)  
+    return u" ".join(t.strip() for t in visible_texts)
 
 
 def get_wikipedia_first_heading(html: BeautifulSoup) -> Optional[str]:
@@ -41,6 +55,19 @@ def get_wikipedia_page_main_content(html: BeautifulSoup) -> Optional[BeautifulSo
         return overall_div
     else:
         return None
+
+
+def get_wikipedia_body_content(html: BeautifulSoup) -> Optional[BeautifulSoup]:
+    """
+    If the main content div doesn't exist, look for main body content instead
+    """
+    body = html.find("div", id="mw-content-text")
+    if body is not None and body != -1:
+        print("wikipedia body content since main content div doesn't exist")
+        return body
+    else:
+        return None
+
 
 
 def scrape_page_metadata(resp: Response, url: str) -> dict:
