@@ -1,11 +1,12 @@
 import argparse
 import io
+import os,sys
 from typing import Optional
 
 from beautifulsoup_tutorial.fetch import fetch_html_from_url
 from beautifulsoup_tutorial.scrape import *
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment, NavigableString
 
 URL = "https://en.wikipedia.org/wiki/List_of_areas_of_law"
 REDIRECTING_URL = "https://en.wikipedia.org/wiki/Corporate_compliance_law"
@@ -66,12 +67,14 @@ def filter_wikipedia_a_links(a: BeautifulSoup):
 	# Ignore any urls that end with ".svg" or ".jpg", which are images
 	# Ignore urls that are about contributing to wikipedia, "Wikipedia:"
 	# Ignore template pages, "Template:"
+	# Ignore urls about help for setting up/writing wikipedia articles, "Help:"
 	# TODO: for now, ignore non-wikipedia urls
 	return a.has_attr("href") and a.get_text().lower().find("edit") == -1 \
 	and a.get_text().lower().find("improve this article") == -1 \
 	and a["href"].find("File:") == -1 \
 	and a["href"].find("Wikipedia:") == -1 \
 	and a["href"].find("Template:") == -1 \
+	and a["href"].find("Help:") == -1 \
 	and not a["href"].endswith(".svg") \
 	and not a["href"].endswith(".jpg") \
 	and not a["href"].endswith(".png") \
@@ -83,10 +86,11 @@ def filter_wikipedia_a_links(a: BeautifulSoup):
 	and not (a["href"].startswith("http") and a["href"].find("wikipedia.org") == -1)
 
 
-def explore_page(name: str, href: str, seen_urls: list, writer: io.TextIOWrapper):
+def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	"""
 	Retrieve all the content on the page
 	Prevent duplicates by verifying it's not in the seen_urls list
+	writer: io.TextIOWrapper
 	"""
 	# Load the web page
 	full_url = prepare_full_url(href)
@@ -117,8 +121,8 @@ def explore_page(name: str, href: str, seen_urls: list, writer: io.TextIOWrapper
 	# Retrieve all visible text from the page
 	containsLaw = False
 	visible_text = text_from_html(response.content)
-	# print("=============visible text==============")
-	# print(visible_text)
+	print("=============visible text==============")
+	print(visible_text)
 	if visible_text.lower().find("law") != -1 or visible_text.lower().find("legal") != -1 \
 	or visible_text.lower().find("statute") != -1 \
 	or visible_text.lower().find("legislative") != -1:
@@ -128,22 +132,99 @@ def explore_page(name: str, href: str, seen_urls: list, writer: io.TextIOWrapper
 		print(f"Does not contain law or legal content: {full_url} \n")
 		return
 
+	# Create new text file for this article
+	if title is None:
+		# Can't find title
+		raise Exception("Title couldn't be found for article!")
+
+	# Replace spaces in article with underscore
+	article_path = os.path.join(data_path, title.replace(" ", "_"))
+	writer = open(article_path + ".txt", "w")
+
 	# Extract all the content on the page
+	# Set any header type tags to be the "topic" and the text within to be the description
+	# Separate topic and description with a tab "\t"
+	print("\n")
+	# texts = overall_div.findAll(string=True)
+	# visible_texts = list(filter(tag_visible, texts))
+	# print(u" ".join(t.strip() for t in visible_texts))
+	overall_visible_str_cat = u" ".join(overall_div.strings)
+	print(overall_visible_str_cat)
+	# TODO: remove anything in brackets like "[<stuff>]", can be reference or something else for Wikipedia article
+	print(f"Number of children elements: {len(overall_div.contents)}")
 
 	# ul for bulleted unordered list, ol for ordered list, dl for description list
 	# Go through all children in the overall_div
-	# for child in overall_div.children:
-	# 	print(child.extract().name)
-	# 	if (child.extract().name == "ul"):
-	# 		print("bulleted list detected!")
-	# 		for gc in child.children:
-	# 			print(gc)
-	# 			print(gc.get_text())
-	# 			# Even though docs say with .find() can't find a given tag, it returns None,
-	# 			# seems like it actually returns -1
-	# 			if (gc.find("a") is not None and gc.find("a") != -1):
-	# 				# Found "a" tag in this element
-	# 				print("href: " + gc.find("a")["href"])
+
+	header = title
+	description = ""
+	# Iterate through the tokens in the concatenated string of all visible text in overal_div (main body content)
+	# split by newline
+	for text in overall_visible_str_cat.split("\n"):
+		print("line: " + text)
+		if text.find("[ edit ]") != -1:
+			print("found header...")
+			# This is a header
+			writer.write(header + "\t" + description + "\n")
+			header = text[:text.find("[ edit ]")] # substring up to [edit]
+			description = ""
+
+			# TODO: For now, ignore the info in "Notes" and "References" to external urls
+			# Also ignore "See Also" sections?
+			if header.find("References") != -1 or header.find("Notes") != -1:
+				break
+		else:
+			description += text + " "
+	# for child in visible_texts:
+	# 	# print(child.name + ": " + child.get_text() + " parent: " + parent_name)
+	# 	print(str(type(child)) + " : " + str(child.name) + " : " + child.get_text())
+	# 	# Find if NavigableString
+	# 	if (isinstance(child, NavigableString)):
+	# 		print(child.name)
+	# 		print(str(child.string))
+	# 	# Find header
+	# 	if (str(child.name).startswith("h")):
+	# 		# write out the previous header and description before overwriting
+	# 		writer.write(header + "\t" + description + "\n")
+	# 		header = child.get_text()
+	# 		description = ""
+
+	# 		# If header is "References", then stop scraping page (considered to be done)
+	# 		# TODO: do we want to get references content?
+	# 		if header == "References" or header == "":
+	# 			break
+	# 	elif (str(child.extract().name) == "ul" or str(child.extract().name) == "ol" or str(child.extract().name) == "dl"):
+	# 		elems_str = get_list_elements(child)
+	# 		print(elems_str)
+	# 	# elif not tag_visible(child):
+	# 	# 	# Problem is parent of a BeautifulSoup object is defined as None
+	# 	# 	# https://beautiful-soup-4.readthedocs.io/en/latest/#parent
+	# 	# 	print("skipping this tag...")
+	# 	# 	# If the child's text is not visible content, ignore
+	# 	# 	continue
+	# 	elif (str(child.name) in ['style', 'script', 'head', 'meta', '[document]']):
+	# 		# Don't need to use any info here
+	# 		print("skipping")
+	# 		continue
+	# 	elif (isinstance(child, Comment)):
+	# 		# Don't store comment info
+	# 		print("skipping")
+	# 		continue
+	# 	else:
+	# 		description += child.get_text()
+	# 		# print("bulleted list detected!")
+	# 		# for gc in child.children:
+	# 		# 	print(gc)
+	# 		# 	print(gc.get_text())
+	# 		# 	# Even though docs say with .find() can't find a given tag, it returns None,
+	# 		# 	# seems like it actually returns -1
+	# 		# 	if (gc.find("a") is not None and gc.find("a") != -1):
+	# 		# 		# Found "a" tag in this element
+	# 		# 		print("href: " + gc.find("a")["href"])
+
+	# Close the writer
+	writer.close()
+	return
 
 	# Get all tag a elements
 	neighbors = []
@@ -158,8 +239,8 @@ def explore_page(name: str, href: str, seen_urls: list, writer: io.TextIOWrapper
 	# recurse through all the unseen tag a elements on this page
 	for n,link in neighbors:
 		if link not in seen_urls:
-			# print("neighboring url to crawl through next: ", link)
-			explore_page(n, link, seen_urls, writer)
+			print("neighboring url to crawl through next: ", link)
+			# explore_page(n, link, seen_urls, writer)
 			
 
 
@@ -210,21 +291,27 @@ def starting_run():
 			unseen_urls.append((a.get_text(), remove_pound_from_urls(a["href"])))
 
 	# write content into a textfile output
-	writer = open("wikipedia_law_scrape_info.txt", "a")
+	data_path = "./scraped_wiki_article_data"
+	os.makedirs(data_path, exist_ok=True)
+	#writer = open("wikipedia_law_scrape_info.txt", "a")
 
 	# DFS
 	print(unseen_urls)
+	count = 0
 	for url in unseen_urls:
+		if (count == 2):
+			break
 		# if url[1].lower().find("trust") == -1:
 		# 	continue
 		# seen_urls.append(url)
 		# response = fetch_html_from_url(BASE_URL + url[1])
 		# page_html = BeautifulSoup(response.content, "html.parser")
 		print("From starting page, exploring url: ", url)
-		explore_page(url[0], url[1], seen_urls, writer)
+		explore_page(url[0], url[1], seen_urls, data_path)
+		count += 1
 
 	# Close the writer
-	writer.close()
+	#writer.close()
 
 
 starting_run()

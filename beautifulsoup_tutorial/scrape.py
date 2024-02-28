@@ -1,22 +1,53 @@
 """Scrape metadata attributes from a requested URL."""
+import re
 from typing import Optional
 
 from bs4 import BeautifulSoup, Comment
 from requests import Response
 
+
+def get_list_elements(list_items: BeautifulSoup):
+    """
+    Get all elements in ul, ol, or dl into one line
+    """
+    print("bulleted list detected!")
+    elements = []
+    if list_items.extract().name == "ul" or list_items.extract().name == "ol":
+        children = list_items.find_all("li")
+    else:
+        # dl case
+        children = list_items.find_all("dt")
+    for gc in children:
+        # Even though docs say with .find() can't find a given tag, it returns None,
+        # seems like it actually returns -1
+        elements.append(gc.get_text())
+    # Join the strings together with comma
+    return ", ".join(elements)
+
+
 def tag_visible(element):
+    """
+    From here: https://stackoverflow.com/questions/1936466/how-to-scrape-only-visible-webpage-text-with-beautifulsoup
+    New version, just use <BeautifulSoup>.strings
+    https://stackoverflow.com/a/41140750
+    """
     if element.parent.name in ['style', 'script', 'head', 'title', 'meta', '[document]']:
         return False
     if isinstance(element, Comment):
         return False
+    # elif re.match(r"[\s\r\n]+",str(element)):
+    #     # eliminate white spaces and new lines
+    #     return False
     return True
 
 
 def text_from_html(body):
     soup = BeautifulSoup(body, 'html.parser')
-    texts = soup.findAll(text=True)
-    visible_texts = filter(tag_visible, texts)  
-    return u" ".join(t.strip() for t in visible_texts)
+    # texts = soup.findAll(string=True)
+    texts = soup.strings
+    # print(type(texts[0]))
+    # visible_texts = filter(tag_visible, texts)  
+    return u" ".join(t.strip() for t in texts)
 
 
 def get_wikipedia_first_heading(html: BeautifulSoup) -> Optional[str]:
