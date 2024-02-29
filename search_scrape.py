@@ -121,8 +121,8 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	# Retrieve all visible text from the page
 	containsLaw = False
 	visible_text = text_from_html(response.content)
-	print("=============visible text==============")
-	print(visible_text)
+	# print("=============visible text==============")
+	# print(visible_text)
 	if visible_text.lower().find("law") != -1 or visible_text.lower().find("legal") != -1 \
 	or visible_text.lower().find("statute") != -1 \
 	or visible_text.lower().find("legislative") != -1:
@@ -148,31 +148,73 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	# texts = overall_div.findAll(string=True)
 	# visible_texts = list(filter(tag_visible, texts))
 	# print(u" ".join(t.strip() for t in visible_texts))
+
 	overall_visible_str_cat = u" ".join(overall_div.strings)
 	print(overall_visible_str_cat)
-	# TODO: remove anything in brackets like "[<stuff>]", can be reference or something else for Wikipedia article
-	print(f"Number of children elements: {len(overall_div.contents)}")
 
 	# ul for bulleted unordered list, ol for ordered list, dl for description list
 	# Go through all children in the overall_div
+	print("\n")
+	# final_output = ""
+	# for t in overall_div.findAll(string=True):
+	# 	if (tag_visible(t)):
+	# 		print(f"line: {t.get_text()} , and tag: {t.name}")
+	# 		# final_output += t.get_text() + " "
+	# 	else:
+	# 		print("not visible")
+	# print(final_output)
+
+	# Find all headers, creating a map of h2 --> list of subheaders
+	all_h = overall_div.find_all(re.compile('^h[1-6]$'))
+	headers = {}
+	prev_h2 = ""
+	for elem in all_h:
+		index = elem.get_text().find("[edit]")
+		if index == -1:
+			key = elem.get_text()
+		else:
+			key = elem.get_text()[:index]
+		# store h2 header as key, have list of subheaders as value
+		if elem.name == "h2":
+			prev_h2 = key
+			headers[prev_h2] = []
+		elif elem.name != "h1":
+			headers[prev_h2].append(key)
+	print(all_h)
+	print("\n")
+	print("map of h2 headers to subheaders: " + str(headers))
 
 	header = title
 	description = ""
+	subheaders = []
+	prev_h2_header = ""
 	# Iterate through the tokens in the concatenated string of all visible text in overal_div (main body content)
 	# split by newline
+	# TODO: remove anything in brackets like "[<stuff>]", can be reference or something else for Wikipedia article
+	# TODO: maybe also remove anything in "<stuff>"?
 	for text in overall_visible_str_cat.split("\n"):
 		print("line: " + text)
 		if text.find("[ edit ]") != -1:
 			print("found header...")
 			# This is a header
-			writer.write(header + "\t" + description + "\n")
-			header = text[:text.find("[ edit ]")] # substring up to [edit]
+			# If it's a subheader of a h2 header, include that information
+			if header in subheaders:
+				print("found subheader")
+				header = prev_h2_header + " - " + header
+			writer.write(header + "\t" + description.strip() + "\n")
+			header = text[:text.find("[ edit ]")].strip() # substring up to [edit]
 			description = ""
 
 			# TODO: For now, ignore the info in "Notes" and "References" to external urls
 			# Also ignore "See Also" sections?
 			if header.find("References") != -1 or header.find("Notes") != -1:
 				break
+
+			# Check if this header is a key (h2)
+			if header in headers:
+				print("Found h2 header")
+				subheaders = headers[header]
+				prev_h2_header = header
 		else:
 			description += text + " "
 	# for child in visible_texts:
@@ -299,7 +341,7 @@ def starting_run():
 	print(unseen_urls)
 	count = 0
 	for url in unseen_urls:
-		if (count == 2):
+		if (count == 10):
 			break
 		# if url[1].lower().find("trust") == -1:
 		# 	continue
