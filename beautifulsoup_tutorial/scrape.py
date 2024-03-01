@@ -43,7 +43,7 @@ def tag_visible(element):
 
 def text_from_html(body):
     soup = BeautifulSoup(body, 'html.parser')
-    # texts = soup.findAll(string=True)
+    # texts = soup.find_all(string=True)
     texts = soup.strings
     # print(type(texts[0]))
     # visible_texts = filter(tag_visible, texts)  

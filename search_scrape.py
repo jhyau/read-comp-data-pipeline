@@ -1,5 +1,6 @@
 import argparse
 import io
+import re
 import os,sys
 from typing import Optional
 
@@ -144,19 +145,19 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	# Extract all the content on the page
 	# Set any header type tags to be the "topic" and the text within to be the description
 	# Separate topic and description with a tab "\t"
-	print("\n")
-	# texts = overall_div.findAll(string=True)
+	# print("\n")
+	# texts = overall_div.find_all(string=True)
 	# visible_texts = list(filter(tag_visible, texts))
 	# print(u" ".join(t.strip() for t in visible_texts))
 
 	overall_visible_str_cat = u" ".join(overall_div.strings)
-	print(overall_visible_str_cat)
+	# print(overall_visible_str_cat)
 
 	# ul for bulleted unordered list, ol for ordered list, dl for description list
 	# Go through all children in the overall_div
 	print("\n")
 	# final_output = ""
-	# for t in overall_div.findAll(string=True):
+	# for t in overall_div.find_all(string=True):
 	# 	if (tag_visible(t)):
 	# 		print(f"line: {t.get_text()} , and tag: {t.name}")
 	# 		# final_output += t.get_text() + " "
@@ -165,6 +166,7 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	# print(final_output)
 
 	# Find all headers, creating a map of h2 --> list of subheaders
+	# TODO: do we need to consider subtiers like h3 --> h4 headers?
 	all_h = overall_div.find_all(re.compile('^h[1-6]$'))
 	headers = {}
 	prev_h2 = ""
@@ -184,14 +186,25 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	print("\n")
 	print("map of h2 headers to subheaders: " + str(headers))
 
+	# TODO: Ignore info in tables?
+	table_strings = []
+	all_tables = overall_div.find_all("table")
+	for tbody in all_tables:
+		print("&&&&&&&&&&&&&&&&&&&Table string&&&&&&&&&&&&&&&&&")
+		table_str = u" ".join(tbody.strings).replace("\n", " ")
+		print(table_str)
+		table_strings.append(table_str)
+
+
 	header = title
 	description = ""
 	subheaders = []
 	prev_h2_header = ""
 	# Iterate through the tokens in the concatenated string of all visible text in overal_div (main body content)
 	# split by newline
-	# TODO: remove anything in brackets like "[<stuff>]", can be reference or something else for Wikipedia article
-	# TODO: maybe also remove anything in "<stuff>"?
+	# Remove anything in brackets like "[<stuff>]", can be reference or something else for Wikipedia article
+	# https://stackoverflow.com/questions/22225006/how-to-replace-only-the-contents-within-brackets-using-regular-expressions
+	# TODO: maybe also remove unicode characters? string_clean = re.sub(r"[^\x00-\x7F]+", "", string_unicode)
 	for text in overall_visible_str_cat.split("\n"):
 		print("line: " + text)
 		if text.find("[ edit ]") != -1:
@@ -201,6 +214,15 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 			if header in subheaders:
 				print("found subheader")
 				header = prev_h2_header + " - " + header
+			
+			# Remove string from tables
+			for s in table_strings:
+				if description.find(s) != -1:
+					print("FOUND TABLE STRING IN DESCRIPTION")
+					description = description.replace(s, "")
+
+			# Remove references in "[]"
+			description = re.sub(r"\[.*?\]", "", description)
 			writer.write(header + "\t" + description.strip() + "\n")
 			header = text[:text.find("[ edit ]")].strip() # substring up to [edit]
 			description = ""
@@ -266,7 +288,7 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 
 	# Close the writer
 	writer.close()
-	return
+	# return
 
 	# Get all tag a elements
 	neighbors = []
@@ -282,7 +304,7 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	for n,link in neighbors:
 		if link not in seen_urls:
 			print("neighboring url to crawl through next: ", link)
-			# explore_page(n, link, seen_urls, writer)
+			explore_page(n, link, seen_urls, writer)
 			
 
 
@@ -341,7 +363,7 @@ def starting_run():
 	print(unseen_urls)
 	count = 0
 	for url in unseen_urls:
-		if (count == 10):
+		if (count == 1):
 			break
 		# if url[1].lower().find("trust") == -1:
 		# 	continue
