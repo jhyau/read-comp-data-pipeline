@@ -69,6 +69,7 @@ def filter_wikipedia_a_links(a: BeautifulSoup):
 	# Ignore urls that are about contributing to wikipedia, "Wikipedia:"
 	# Ignore template pages, "Template:"
 	# Ignore urls about help for setting up/writing wikipedia articles, "Help:"
+	# Ignore urls about categories, "Category:"
 	# TODO: for now, ignore non-wikipedia urls
 	return a.has_attr("href") and a.get_text().lower().find("edit") == -1 \
 	and a.get_text().lower().find("improve this article") == -1 \
@@ -76,6 +77,7 @@ def filter_wikipedia_a_links(a: BeautifulSoup):
 	and a["href"].find("Wikipedia:") == -1 \
 	and a["href"].find("Template:") == -1 \
 	and a["href"].find("Help:") == -1 \
+	and a["href"].find("Category:") == -1 \
 	and not a["href"].endswith(".svg") \
 	and not a["href"].endswith(".jpg") \
 	and not a["href"].endswith(".png") \
@@ -120,18 +122,10 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	# If the page doesn't ever mention "law" or "legal", then treat as unrelated content and skip the page
 	# Note that sometimes some things are in b tag for bold...
 	# Retrieve all visible text from the page
-	containsLaw = False
-	visible_text = text_from_html(response.content)
+	# containsLaw = False
+	# visible_text = text_from_html(response.content)
 	# print("=============visible text==============")
 	# print(visible_text)
-	if visible_text.lower().find("law") != -1 or visible_text.lower().find("legal") != -1 \
-	or visible_text.lower().find("statute") != -1 \
-	or visible_text.lower().find("legislative") != -1:
-		containsLaw = True
-	
-	if not containsLaw:
-		print(f"Does not contain law or legal content: {full_url} \n")
-		return
 
 	# Create new text file for this article
 	if title is None:
@@ -145,13 +139,21 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	# Extract all the content on the page
 	# Set any header type tags to be the "topic" and the text within to be the description
 	# Separate topic and description with a tab "\t"
-	# print("\n")
-	# texts = overall_div.find_all(string=True)
-	# visible_texts = list(filter(tag_visible, texts))
-	# print(u" ".join(t.strip() for t in visible_texts))
 
 	overall_visible_str_cat = u" ".join(overall_div.strings)
+	# Remove all double spaces, replace with single space
+	overall_visible_str_cat = overall_visible_str_cat.replace("  ", " ")
 	# print(overall_visible_str_cat)
+
+	containsLaw = False
+	if overall_visible_str_cat.lower().find("law") != -1 or overall_visible_str_cat.lower().find("legal") != -1 \
+	or overall_visible_str_cat.lower().find("statute") != -1 \
+	or overall_visible_str_cat.lower().find("legislative") != -1:
+		containsLaw = True
+
+	if not containsLaw:
+		print(f"Does not contain law or legal content: {full_url} \n")
+		return
 
 	# ul for bulleted unordered list, ol for ordered list, dl for description list
 	# Go through all children in the overall_div
@@ -165,78 +167,113 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	# 		print("not visible")
 	# print(final_output)
 
-	# Find all headers, creating a map of h2 --> list of subheaders
-	# TODO: do we need to consider subtiers like h3 --> h4 headers?
+	# Find all headers, creating a list of headers where each element is a tuple of (header, list of parents)
+	# Sometimes there's no "[edit]" in the header, need to handle that case
+	headers_have_edit = False
 	all_h = overall_div.find_all(re.compile('^h[1-6]$'))
-	headers = {}
+	header_strs_only = []
+	header_map_list = []
+	# Include the title in header_map_list to handle first text written out to file
+	header_map_list.append((title, []))
 	prev_h2 = ""
+	prev_h3 = ""
+	prev_h4 = ""
+	prev_h5 = ""
 	for elem in all_h:
 		index = elem.get_text().find("[edit]")
 		if index == -1:
-			key = elem.get_text()
+			key = elem.get_text().strip()
 		else:
-			key = elem.get_text()[:index]
-		# store h2 header as key, have list of subheaders as value
+			headers_have_edit = True
+			key = elem.get_text()[:index].strip()
+		# each header in to the list in a tuple, with a list of its parents
+		header_strs_only.append(key)
 		if elem.name == "h2":
+			# No parents for h2, since h1 is the title
 			prev_h2 = key
-			headers[prev_h2] = []
-		elif elem.name != "h1":
-			headers[prev_h2].append(key)
+			header_map_list.append((key, []))	
+		elif elem.name == "h3":
+			# One parent, h2
+			prev_h3 = key
+			header_map_list.append((key, [prev_h2]))
+		elif elem.name == "h4":
+			# TWo parents, h2 and h3
+			prev_h4 = key
+			header_map_list.append((key, [prev_h2, prev_h3]))
+		elif elem.name == "h5":
+			# Three parents, h2, h3, and h4
+			prev_h5 = key
+			header_map_list.append((key, [prev_h2, prev_h3, prev_h4]))
+		elif elem.name == "h6":
+			# Four parents: h2, h3, h4, and h5
+			header_map_list.append((key, [prev_h2, prev_h3, prev_h4, prev_h5]))
+			
 	print(all_h)
 	print("\n")
-	print("map of h2 headers to subheaders: " + str(headers))
+	print("List of headers: " + str(header_map_list))
 
-	# TODO: Ignore info in tables?
+	# Ignore info in tables(?)
 	table_strings = []
 	all_tables = overall_div.find_all("table")
 	for tbody in all_tables:
-		print("&&&&&&&&&&&&&&&&&&&Table string&&&&&&&&&&&&&&&&&")
-		table_str = u" ".join(tbody.strings).replace("\n", " ")
-		print(table_str)
+		# print("&&&&&&&&&&&&&&&&&&&Table string&&&&&&&&&&&&&&&&&")
+		table_str = u" ".join(tbody.strings)
+		table_str = table_str.replace("  ", " ").replace("\n", " ").strip()
+		# print(table_str)
 		table_strings.append(table_str)
 
-
 	header = title
+	hdr_index = 0 # Headers must be found in order, otherwise it's not a header
 	description = ""
-	subheaders = []
-	prev_h2_header = ""
+	num = len(overall_visible_str_cat.split("\n"))
+	print(f"Number of tokens split by newline: {num}")
 	# Iterate through the tokens in the concatenated string of all visible text in overal_div (main body content)
 	# split by newline
 	# Remove anything in brackets like "[<stuff>]", can be reference or something else for Wikipedia article
 	# https://stackoverflow.com/questions/22225006/how-to-replace-only-the-contents-within-brackets-using-regular-expressions
 	# TODO: maybe also remove unicode characters? string_clean = re.sub(r"[^\x00-\x7F]+", "", string_unicode)
 	for text in overall_visible_str_cat.split("\n"):
-		print("line: " + text)
-		if text.find("[ edit ]") != -1:
+		# print("line: " + text)
+		if text.find("[ edit ]") != -1 or text.strip() in header_strs_only:
 			print("found header...")
+			if text.strip() != header_strs_only[hdr_index] \
+			and text[:text.find("[ edit ]")].strip() != header_strs_only[hdr_index]:
+				print(f"Wrong order, this is not a header: {text.strip()}")
+				description += text + " "
+				continue
+
 			# This is a header
-			# If it's a subheader of a h2 header, include that information
-			if header in subheaders:
-				print("found subheader")
-				header = prev_h2_header + " - " + header
+			# Find all parents if it is a subheader
+			assert(header_map_list[hdr_index][0] == header)
+			total_header = ""
+			for h in header_map_list[hdr_index][1]:
+				total_header += h + " - "
+			total_header += header
 			
 			# Remove string from tables
+			# TODO: remove unicode characters?
+			# string_clean = re.sub(r"[^\x00-\x7F]+", "", description)
+			# print(string_clean)
 			for s in table_strings:
 				if description.find(s) != -1:
-					print("FOUND TABLE STRING IN DESCRIPTION")
+					print(f"FOUND TABLE STRING IN DESCRIPTION: {s}")
 					description = description.replace(s, "")
 
 			# Remove references in "[]"
+			# TODO: if the description is empty, like for a h2 without any subtext, don't include in the output file
 			description = re.sub(r"\[.*?\]", "", description)
-			writer.write(header + "\t" + description.strip() + "\n")
-			header = text[:text.find("[ edit ]")].strip() # substring up to [edit]
+			writer.write(total_header + "\t" + description.strip() + "\n")
+			if text.find("[ edit ]") != -1:
+				header = text[:text.find("[ edit ]")].strip() # substring up to [edit]
+			else:
+				header = text.strip()
 			description = ""
+			hdr_index += 1 # increment to next expected header
 
 			# TODO: For now, ignore the info in "Notes" and "References" to external urls
 			# Also ignore "See Also" sections?
 			if header.find("References") != -1 or header.find("Notes") != -1:
 				break
-
-			# Check if this header is a key (h2)
-			if header in headers:
-				print("Found h2 header")
-				subheaders = headers[header]
-				prev_h2_header = header
 		else:
 			description += text + " "
 	# for child in visible_texts:
@@ -304,7 +341,7 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	for n,link in neighbors:
 		if link not in seen_urls:
 			print("neighboring url to crawl through next: ", link)
-			explore_page(n, link, seen_urls, writer)
+			explore_page(n, link, seen_urls, data_path)
 			
 
 
@@ -326,10 +363,6 @@ def starting_run():
 	# Get the main content div
 	overall_div = get_wikipedia_page_main_content(html)
 
-	# Finding all p tags within the div
-	# overall_p = overall_div.find_all("p")
-	# for p in overall_p:
-	# 	print(p.get_text())
 	# headline = html.find("span", class_="mw-headline")
 	# print("headline: " + headline.string)
 
@@ -357,13 +390,12 @@ def starting_run():
 	# write content into a textfile output
 	data_path = "./scraped_wiki_article_data"
 	os.makedirs(data_path, exist_ok=True)
-	#writer = open("wikipedia_law_scrape_info.txt", "a")
 
 	# DFS
 	print(unseen_urls)
 	count = 0
 	for url in unseen_urls:
-		if (count == 1):
+		if (count == 3):
 			break
 		# if url[1].lower().find("trust") == -1:
 		# 	continue
@@ -374,8 +406,7 @@ def starting_run():
 		explore_page(url[0], url[1], seen_urls, data_path)
 		count += 1
 
-	# Close the writer
-	#writer.close()
-
 
 starting_run()
+
+# explore_page("Alexander Hamilton", "/wiki/Alexander_Hamilton", [], "./scraped_wiki_article_data")
