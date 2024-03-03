@@ -102,6 +102,7 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 
 	# If url redirected to a previously seen url, then return. No need to explore this page
 	if identify_redirecting_urls(seen_urls, response) or href in seen_urls:
+		print(f"*********Redirected or already seen url. Returning***************")
 		return
 
 	# Mark this url as seen
@@ -122,7 +123,6 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	# If the page doesn't ever mention "law" or "legal", then treat as unrelated content and skip the page
 	# Note that sometimes some things are in b tag for bold...
 	# Retrieve all visible text from the page
-	# containsLaw = False
 	# visible_text = text_from_html(response.content)
 	# print("=============visible text==============")
 	# print(visible_text)
@@ -131,10 +131,6 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	if title is None:
 		# Can't find title
 		raise Exception("Title couldn't be found for article!")
-
-	# Replace spaces in article with underscore
-	article_path = os.path.join(data_path, title.replace(" ", "_"))
-	writer = open(article_path + ".txt", "w")
 
 	# Extract all the content on the page
 	# Set any header type tags to be the "topic" and the text within to be the description
@@ -146,14 +142,59 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	# print(overall_visible_str_cat)
 
 	containsLaw = False
-	if overall_visible_str_cat.lower().find("law") != -1 or overall_visible_str_cat.lower().find("legal") != -1 \
-	or overall_visible_str_cat.lower().find("statute") != -1 \
-	or overall_visible_str_cat.lower().find("legislative") != -1:
+	# This won't work since the term "notes" can show up earlier, not just at the header
+	# Should have at least 2 of these terms to pass
+	# notes_idx = overall_visible_str_cat.lower().find("notes")
+	# references_idx = overall_visible_str_cat.lower().find("references")
+	# if notes_idx == -1 and references_idx != -1:
+	# 	idx = references_idx
+	# elif notes_idx != -1 and references_idx == -1:
+	# 	idx = notes_idx
+	# elif notes_idx != -1 and references_idx != -1:
+	# 	idx = min(notes_idx, references_idx)
+	# else:
+	# idx = len(overall_visible_str_cat)
+	# print("Idx to check if article is about law: " + str(idx))
+	checks = []
+	law_check = overall_visible_str_cat.lower().find("law") != -1
+	checks.append(law_check)
+	legal_check = overall_visible_str_cat.lower().find("legal") != -1
+	checks.append(legal_check)
+	statute_check = overall_visible_str_cat.lower().find("statute") != -1
+	checks.append(statute_check)
+	legislative_check = overall_visible_str_cat.lower().find("legislative") != -1
+	checks.append(legislative_check)
+	judicial_check = overall_visible_str_cat.lower().find("judicial") != -1
+	checks.append(judicial_check)
+	legislation_check = overall_visible_str_cat.lower().find("legislation") != -1
+	checks.append(legislation_check)
+	gov_check = overall_visible_str_cat.lower().find("government") != -1
+	checks.append(gov_check)
+	court_check = overall_visible_str_cat.lower().find("court") != -1
+	checks.append(court_check)
+	due_process = overall_visible_str_cat.lower().find("due process") != -1
+	checks.append(due_process)
+	jurisprudence = overall_visible_str_cat.lower().find("jurisprudence") != -1
+	check.append(jurisprudence)
+	jury = overall_visible_str_cat.lower().find("jury") != -1
+	check,append(jury)
+
+	num_pass = sum(checks)
+	print(f"number of law checks that pass: {num_pass} / {len(checks)}")
+	if num_pass >= 2:
+		print(f"Contains law: {law_check}")
+		print(f"Contains legal: {legal_check}")
+		print(f"Contains statute: {statute_check}")
+		print(f"Contains legislative: {legislative_check}")
 		containsLaw = True
 
 	if not containsLaw:
 		print(f"Does not contain law or legal content: {full_url} \n")
 		return
+
+	# Replace spaces in article with underscore
+	article_path = os.path.join(data_path, title.replace(" ", "_"))
+	writer = open(article_path + ".txt", "w")
 
 	# ul for bulleted unordered list, ol for ordered list, dl for description list
 	# Go through all children in the overall_div
@@ -208,7 +249,7 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 			# Four parents: h2, h3, h4, and h5
 			header_map_list.append((key, [prev_h2, prev_h3, prev_h4, prev_h5]))
 			
-	print(all_h)
+	# print(all_h)
 	print("\n")
 	print("List of headers: " + str(header_map_list))
 
@@ -221,6 +262,8 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 		table_str = table_str.replace("  ", " ").replace("\n", " ").strip()
 		# print(table_str)
 		table_strings.append(table_str)
+
+	# TODO: ignore info in figures?
 
 	header = title
 	hdr_index = 0 # Headers must be found in order, otherwise it's not a header
@@ -395,8 +438,8 @@ def starting_run():
 	print(unseen_urls)
 	count = 0
 	for url in unseen_urls:
-		if (count == 3):
-			break
+		# if (count == 10):
+		# 	break
 		# if url[1].lower().find("trust") == -1:
 		# 	continue
 		# seen_urls.append(url)
@@ -405,8 +448,8 @@ def starting_run():
 		print("From starting page, exploring url: ", url)
 		explore_page(url[0], url[1], seen_urls, data_path)
 		count += 1
-
+	print(f"!!!!!!!!!!!!!Finished!!!!!!!!!! Number of main urls searched through: {count}")
 
 starting_run()
 
-# explore_page("Alexander Hamilton", "/wiki/Alexander_Hamilton", [], "./scraped_wiki_article_data")
+# explore_page("Alexander Hamilton", "/wiki/Alexander_Hamilton_(sailor)", [], "./scraped_wiki_article_data")
