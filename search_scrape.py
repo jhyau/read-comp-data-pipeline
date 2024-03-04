@@ -70,6 +70,7 @@ def filter_wikipedia_a_links(a: BeautifulSoup):
 	# Ignore template pages, "Template:"
 	# Ignore urls about help for setting up/writing wikipedia articles, "Help:"
 	# Ignore urls about categories, "Category:"
+	# Ignore urls about the quality of the articles for now, "Talk:"
 	# TODO: for now, ignore non-wikipedia urls
 	return a.has_attr("href") and a.get_text().lower().find("edit") == -1 \
 	and a.get_text().lower().find("improve this article") == -1 \
@@ -78,6 +79,7 @@ def filter_wikipedia_a_links(a: BeautifulSoup):
 	and a["href"].find("Template:") == -1 \
 	and a["href"].find("Help:") == -1 \
 	and a["href"].find("Category:") == -1 \
+	and a["href"].find("Talk:") == -1 \
 	and not a["href"].endswith(".svg") \
 	and not a["href"].endswith(".jpg") \
 	and not a["href"].endswith(".png") \
@@ -89,7 +91,7 @@ def filter_wikipedia_a_links(a: BeautifulSoup):
 	and not (a["href"].startswith("http") and a["href"].find("wikipedia.org") == -1)
 
 
-def explore_page(name: str, href: str, seen_urls: list, data_path: str):
+def explore_page(name: str, href: str, seen_urls: list, data_path: str, logger: io.TextIOWrapper):
 	"""
 	Retrieve all the content on the page
 	Prevent duplicates by verifying it's not in the seen_urls list
@@ -103,12 +105,15 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	# If url redirected to a previously seen url, then return. No need to explore this page
 	if identify_redirecting_urls(seen_urls, response) or href in seen_urls:
 		print(f"*********Redirected or already seen url. Returning***************")
+		logger.write(f"*********Redirected or already seen url. Returning***************\n")
 		return
 
 	# Mark this url as seen
 	seen_urls.append(href)
 	print("Exploring url: ", full_url)
 	print("seen urls list: ", seen_urls)
+	logger.write("Exploring url: " + full_url + "\n")
+	logger.write("seen urls list: " + str(seen_urls) + "\n")
 
 	# Get the wikipedia page visible title
 	title = get_wikipedia_page_title(html)
@@ -127,10 +132,19 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	# print("=============visible text==============")
 	# print(visible_text)
 
+	# If overall_div is still None, then can't scrape this page
+	if overall_div is None:
+		logger.write("overall_div is None. Returning...\n")
+		print("overall_div is None. Returning")
+		return
+
 	# Create new text file for this article
 	if title is None:
 		# Can't find title
-		raise Exception("Title couldn't be found for article!")
+		# raise Exception("Title couldn't be found for article!")
+		logger.write("Title couldn't be found for article! Returning\n")
+		print("Title couldn't be found for article!")
+		return
 
 	# Extract all the content on the page
 	# Set any header type tags to be the "topic" and the text within to be the description
@@ -155,29 +169,19 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	# else:
 	# idx = len(overall_visible_str_cat)
 	# print("Idx to check if article is about law: " + str(idx))
-	checks = []
 	law_check = overall_visible_str_cat.lower().find("law") != -1
-	checks.append(law_check)
 	legal_check = overall_visible_str_cat.lower().find("legal") != -1
-	checks.append(legal_check)
 	statute_check = overall_visible_str_cat.lower().find("statute") != -1
-	checks.append(statute_check)
 	legislative_check = overall_visible_str_cat.lower().find("legislative") != -1
-	checks.append(legislative_check)
 	judicial_check = overall_visible_str_cat.lower().find("judicial") != -1
-	checks.append(judicial_check)
 	legislation_check = overall_visible_str_cat.lower().find("legislation") != -1
-	checks.append(legislation_check)
 	gov_check = overall_visible_str_cat.lower().find("government") != -1
-	checks.append(gov_check)
 	court_check = overall_visible_str_cat.lower().find("court") != -1
-	checks.append(court_check)
 	due_process = overall_visible_str_cat.lower().find("due process") != -1
-	checks.append(due_process)
 	jurisprudence = overall_visible_str_cat.lower().find("jurisprudence") != -1
-	check.append(jurisprudence)
 	jury = overall_visible_str_cat.lower().find("jury") != -1
-	check,append(jury)
+	checks = [law_check, legal_check, statute_check, legislative_check, judicial_check, legislation_check, gov_check, \
+	court_check, due_process, jurisprudence]
 
 	num_pass = sum(checks)
 	print(f"number of law checks that pass: {num_pass} / {len(checks)}")
@@ -186,15 +190,37 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 		print(f"Contains legal: {legal_check}")
 		print(f"Contains statute: {statute_check}")
 		print(f"Contains legislative: {legislative_check}")
+		print(f"Contains judicial: {judicial_check}")
+		print(f"Contains legislation: {legislation_check}")
+		print(f"Contains government: {gov_check}")
+		print(f"Contains court: {court_check}")
+		print(f"Contains due process: {due_process}")
+		print(f"Contains jurisprudence: {jurisprudence}")
+		print(f"Contains jury: {jury}")
+		logger.write(f"Contains law: {law_check}\n")
+		logger.write(f"Contains legal: {legal_check}\n")
+		logger.write(f"Contains statute: {statute_check}\n")
+		logger.write(f"Contains legislative: {legislative_check}\n")
+		logger.write(f"Contains judicial: {judicial_check}\n")
+		logger.write(f"Contains legislation: {legislation_check}\n")
+		logger.write(f"Contains government: {gov_check}\n")
+		logger.write(f"Contains court: {court_check}\n")
+		logger.write(f"Contains due process: {due_process}\n")
+		logger.write(f"Contains jurisprudence: {jurisprudence}\n")
+		logger.write(f"Contains jury: {jury}\n")
 		containsLaw = True
 
 	if not containsLaw:
 		print(f"Does not contain law or legal content: {full_url} \n")
+		logger.write(f"Does not contain law or legal content: {full_url} \n")
 		return
 
 	# Replace spaces in article with underscore
 	article_path = os.path.join(data_path, title.replace(" ", "_"))
-	writer = open(article_path + ".txt", "w")
+	if os.path.exists(article_path + ".txt"):
+		writer = open(article_path + "-seenUrls-" + str(len(seen_urls)) + ".txt", "w")
+	else:
+		writer = open(article_path + ".txt", "w")
 
 	# ul for bulleted unordered list, ol for ordered list, dl for description list
 	# Go through all children in the overall_div
@@ -252,6 +278,7 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	# print(all_h)
 	print("\n")
 	print("List of headers: " + str(header_map_list))
+	logger.write("\nList of headers: " + str(header_map_list) + "\n")
 
 	# Ignore info in tables(?)
 	table_strings = []
@@ -261,6 +288,8 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 		table_str = u" ".join(tbody.strings)
 		table_str = table_str.replace("  ", " ").replace("\n", " ").strip()
 		# print(table_str)
+		logger.write("&&&&&&&&&&&&&&&&&&&Table string&&&&&&&&&&&&&&&&&\n")
+		logger.write(table_str + "\n")
 		table_strings.append(table_str)
 
 	# TODO: ignore info in figures?
@@ -270,18 +299,21 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	description = ""
 	num = len(overall_visible_str_cat.split("\n"))
 	print(f"Number of tokens split by newline: {num}")
+	logger.write(f"Number of tokens split by newline: {num}\n")
 	# Iterate through the tokens in the concatenated string of all visible text in overal_div (main body content)
 	# split by newline
 	# Remove anything in brackets like "[<stuff>]", can be reference or something else for Wikipedia article
 	# https://stackoverflow.com/questions/22225006/how-to-replace-only-the-contents-within-brackets-using-regular-expressions
-	# TODO: maybe also remove unicode characters? string_clean = re.sub(r"[^\x00-\x7F]+", "", string_unicode)
 	for text in overall_visible_str_cat.split("\n"):
 		# print("line: " + text)
+		logger.write("line: " + text + "\n")
 		if text.find("[ edit ]") != -1 or text.strip() in header_strs_only:
 			print("found header...")
+			logger.write("found header...\n")
 			if text.strip() != header_strs_only[hdr_index] \
 			and text[:text.find("[ edit ]")].strip() != header_strs_only[hdr_index]:
 				print(f"Wrong order, this is not a header: {text.strip()}")
+				logger.write(f"Wrong order, this is not a header: {text.strip()}\n")
 				description += text + " "
 				continue
 
@@ -300,6 +332,7 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 			for s in table_strings:
 				if description.find(s) != -1:
 					print(f"FOUND TABLE STRING IN DESCRIPTION: {s}")
+					logger.write(f"FOUND TABLE STRING IN DESCRIPTION: {s}\n")
 					description = description.replace(s, "")
 
 			# Remove references in "[]"
@@ -316,6 +349,8 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 			# TODO: For now, ignore the info in "Notes" and "References" to external urls
 			# Also ignore "See Also" sections?
 			if header.find("References") != -1 or header.find("Notes") != -1:
+				print("Found references or Notes, breaking...")
+				logger.write("Found references or Notes, breaking...\n")
 				break
 		else:
 			description += text + " "
@@ -368,7 +403,7 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 
 	# Close the writer
 	writer.close()
-	# return
+	retdurn
 
 	# Get all tag a elements
 	neighbors = []
@@ -384,7 +419,8 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str):
 	for n,link in neighbors:
 		if link not in seen_urls:
 			print("neighboring url to crawl through next: ", link)
-			explore_page(n, link, seen_urls, data_path)
+			logger.write("neighboring url to crawl through next: " + link + "\n\n")
+			explore_page(n, link, seen_urls, data_path, logger)
 			
 
 
@@ -392,6 +428,8 @@ def starting_run():
 	parser = argparse.ArgumentParser(description='Pass in starting URL for wikipedia law scraping')
 	parser.add_argument('--url', default=URL, type=str,
 	                    help='wikipedia URL to start scraping for law/legal content ')
+	parser.add_argument('--data_path', default="./scraped_wiki_article_data", type=str,
+		help="path to create an output directory to save the scraped files")
 	# parser.add_argument('--sum', dest='accumulate', action='store_const',
 	#                     const=sum, default=max,
 	#                     help='sum the integers (default: find the max)')
@@ -405,9 +443,6 @@ def starting_run():
 		title = get_wikipedia_first_heading(html)
 	# Get the main content div
 	overall_div = get_wikipedia_page_main_content(html)
-
-	# headline = html.find("span", class_="mw-headline")
-	# print("headline: " + headline.string)
 
 	# Find all tag a for hrefs in the main content that will need to be crawled through
 	# The pages might have citations, where the href is pointing to somewhere in the same page with
@@ -431,25 +466,30 @@ def starting_run():
 			unseen_urls.append((a.get_text(), remove_pound_from_urls(a["href"])))
 
 	# write content into a textfile output
-	data_path = "./scraped_wiki_article_data"
+	data_path = args.data_path
 	os.makedirs(data_path, exist_ok=True)
+
+	# Logger
+	log_path = os.path.join(data_path, "log.txt")
+	logger = open(log_path, "w")
 
 	# DFS
 	print(unseen_urls)
+	logger.write("unseen urls: " + str(unseen_urls) + "\n")
 	count = 0
 	for url in unseen_urls:
 		# if (count == 10):
 		# 	break
 		# if url[1].lower().find("trust") == -1:
 		# 	continue
-		# seen_urls.append(url)
-		# response = fetch_html_from_url(BASE_URL + url[1])
-		# page_html = BeautifulSoup(response.content, "html.parser")
 		print("From starting page, exploring url: ", url)
-		explore_page(url[0], url[1], seen_urls, data_path)
+		logger.write("From starting page, exploring url: " + url + "\n")
+		explore_page(url[0], url[1], seen_urls, data_path, logger)
 		count += 1
 	print(f"!!!!!!!!!!!!!Finished!!!!!!!!!! Number of main urls searched through: {count}")
+	logger.write(f"!!!!!!!!!!!!!Finished!!!!!!!!!! Number of main urls searched through: {count}")
+	logger.close()
 
 starting_run()
 
-# explore_page("Alexander Hamilton", "/wiki/Alexander_Hamilton_(sailor)", [], "./scraped_wiki_article_data")
+# explore_page("Demography of Belfast", "/wiki/Demography_of_Belfast", [], "./scraped_wiki_article_data")
