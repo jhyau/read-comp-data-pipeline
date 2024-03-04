@@ -91,7 +91,7 @@ def filter_wikipedia_a_links(a: BeautifulSoup):
 	and not (a["href"].startswith("http") and a["href"].find("wikipedia.org") == -1)
 
 
-def filter_url(url: str):
+def accepted_url(url: str):
 	return url.find("File:") == -1 \
 	and url.find("Wikipedia:") == -1 \
 	and url.find("Template:") == -1 \
@@ -121,7 +121,7 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str, logger: 
 	html = BeautifulSoup(response.content, "html.parser")
 
 	# If url redirected to a previously seen url, then return. No need to explore this page
-	if identify_redirecting_urls(seen_urls, response) or href in seen_urls or filter_url(resp.url):
+	if identify_redirecting_urls(seen_urls, response) or href in seen_urls or not accepted_url(resp.url):
 		print(f"*********Redirected or already seen url or should be filtered out. Returning***************")
 		logger.write(f"*********Redirected or already seen url or should be filtered out. Returning***************\n")
 		return
