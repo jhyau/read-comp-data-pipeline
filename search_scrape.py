@@ -305,11 +305,17 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str, logger: 
 	# Remove anything in brackets like "[<stuff>]", can be reference or something else for Wikipedia article
 	# https://stackoverflow.com/questions/22225006/how-to-replace-only-the-contents-within-brackets-using-regular-expressions
 	for text in overall_visible_str_cat.split("\n"):
-		# print("line: " + text)
+		print("line: " + text)
 		logger.write("line: " + text + "\n")
 		if text.find("[ edit ]") != -1 or text.strip() in header_strs_only:
+			if hdr_index == len(header_strs_only):
+				print("Went through all headers, continue")
+				logger.write("Went through all headeres, continue\n")
+				description += text + " "
+				continue
 			print("found header...")
 			logger.write("found header...\n")
+			
 			if text.strip() != header_strs_only[hdr_index] \
 			and text[:text.find("[ edit ]")].strip() != header_strs_only[hdr_index]:
 				print(f"Wrong order, this is not a header: {text.strip()}")
@@ -354,6 +360,24 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str, logger: 
 				break
 		else:
 			description += text + " "
+	
+	# Write out the final header's info if didn't end earlier
+	if description != "":
+		print("Final header and description")
+		total_header = ""
+		for h in header_map_list[-1][1]:
+			total_header += h + " - "
+		total_header += header
+
+		for s in table_strings:
+			if description.find(s) != -1:
+				print(f"FOUND TABLE STRING IN DESCRIPTION: {s}")
+				logger.write(f"FOUND TABLE STRING IN DESCRIPTION: {s}\n")
+				description = description.replace(s, "")
+
+		description = re.sub(r"\[.*?\]", "", description)
+		writer.write(total_header + "\t" + description.strip() + "\n")
+
 	# for child in visible_texts:
 	# 	# print(child.name + ": " + child.get_text() + " parent: " + parent_name)
 	# 	print(str(type(child)) + " : " + str(child.name) + " : " + child.get_text())
@@ -403,7 +427,7 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str, logger: 
 
 	# Close the writer
 	writer.close()
-	retdurn
+	return
 
 	# Get all tag a elements
 	neighbors = []
@@ -483,7 +507,7 @@ def starting_run():
 		# if url[1].lower().find("trust") == -1:
 		# 	continue
 		print("From starting page, exploring url: ", url)
-		logger.write("From starting page, exploring url: " + url + "\n")
+		logger.write("From starting page, exploring url: " + str(url) + "\n")
 		explore_page(url[0], url[1], seen_urls, data_path, logger)
 		count += 1
 	print(f"!!!!!!!!!!!!!Finished!!!!!!!!!! Number of main urls searched through: {count}")
@@ -492,4 +516,7 @@ def starting_run():
 
 starting_run()
 
-# explore_page("Demography of Belfast", "/wiki/Demography_of_Belfast", [], "./scraped_wiki_article_data")
+# Logger
+# log_path = os.path.join("./scraped_wiki_article_data", "log.txt")
+# logger = open(log_path, "w")
+# explore_page("Dáil Éireann (Irish Free State)", "/wiki/D%C3%A1il_%C3%89ireann_(Irish_Free_State)", [], "./scraped_wiki_article_data", logger)
