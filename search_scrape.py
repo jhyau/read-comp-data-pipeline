@@ -91,6 +91,24 @@ def filter_wikipedia_a_links(a: BeautifulSoup):
 	and not (a["href"].startswith("http") and a["href"].find("wikipedia.org") == -1)
 
 
+def filter_url(url: str):
+	return url.find("File:") == -1 \
+	and url.find("Wikipedia:") == -1 \
+	and url.find("Template:") == -1 \
+	and url.find("Help:") == -1 \
+	and url.find("Category:") == -1 \
+	and url.find("Talk:") == -1 \
+	and url.lower().find("edit") == -1 \
+	and not url.endswith(".svg") \
+	and not url.endswith(".jpg") \
+	and not url.endswith(".png") \
+	and not url.endswith(".js") \
+	and not url.endswith(".mp3") \
+	and not url.endswith(".mp4") \
+	and not url.startswith("#") \
+	and not (url.startswith("http") and url.find("wikipedia.org") == -1)
+
+
 def explore_page(name: str, href: str, seen_urls: list, data_path: str, logger: io.TextIOWrapper):
 	"""
 	Retrieve all the content on the page
@@ -103,9 +121,9 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str, logger: 
 	html = BeautifulSoup(response.content, "html.parser")
 
 	# If url redirected to a previously seen url, then return. No need to explore this page
-	if identify_redirecting_urls(seen_urls, response) or href in seen_urls:
-		print(f"*********Redirected or already seen url. Returning***************")
-		logger.write(f"*********Redirected or already seen url. Returning***************\n")
+	if identify_redirecting_urls(seen_urls, response) or href in seen_urls or filter_url(resp.url):
+		print(f"*********Redirected or already seen url or should be filtered out. Returning***************")
+		logger.write(f"*********Redirected or already seen url or should be filtered out. Returning***************\n")
 		return
 
 	# Mark this url as seen
@@ -215,10 +233,10 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str, logger: 
 		logger.write(f"Does not contain law or legal content: {full_url} \n")
 		return
 
-	# Replace spaces in article with underscore
-	article_path = os.path.join(data_path, title.replace(" ", "_"))
+	# Replace spaces in article with underscore, replace / with hyphen
+	article_path = os.path.join(data_path, title.replace(" ", "_").replace("/", "-"))
 	if os.path.exists(article_path + ".txt"):
-		writer = open(article_path + "-seenUrls-" + str(len(seen_urls)) + ".txt", "w")
+		writer = open(article_path + "_SeenUrls" + str(len(seen_urls)) + ".txt", "w")
 	else:
 		writer = open(article_path + ".txt", "w")
 
@@ -427,7 +445,7 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str, logger: 
 
 	# Close the writer
 	writer.close()
-	return
+	# return
 
 	# Get all tag a elements
 	neighbors = []
