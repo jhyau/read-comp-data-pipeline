@@ -27,4 +27,14 @@ def fetch_html_from_url(url: str) -> Optional[str]:
         print(f"HTTP error occurred: {e}")
     except Exception as e:
         print(f"Unexpected error occurred: {e}")
-        # Try again with slightly different header?
+
+        # Try again with slightly different header? --> Didn't work
+        # print("****Trying again with different header****")
+        # headers2 = {
+        #     "Access-Control-Allow-Origin": "*",
+        #     "Access-Control-Allow-Methods": "GET",
+        #     "Access-Control-Allow-Headers": "Content-Type",
+        #     "Access-Control-Max-Age": "3600",
+        #     "User-Agent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:52.0) Gecko/20100101 Firefox/52.0",
+        # }
+        # return requests.get(url, headers=headers2, timeout=7)

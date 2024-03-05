@@ -3,6 +3,7 @@ import io
 import re
 import os,sys
 import time
+import wikipedia
 from typing import Optional
 
 from beautifulsoup_tutorial.fetch import fetch_html_from_url
@@ -11,12 +12,15 @@ from beautifulsoup_tutorial.scrape import *
 from bs4 import BeautifulSoup, Comment, NavigableString
 
 from requests.exceptions import ConnectionError
+from wikipedia.exceptions import DisambiguationError, PageError, RedirectError
 
 URL = "https://en.wikipedia.org/wiki/List_of_areas_of_law"
 REDIRECTING_URL = "https://en.wikipedia.org/wiki/Corporate_compliance_law"
 ANOTHER_URL = "https://en.wikipedia.org/wiki/Category:Corporate_law"
 BASE_URL = "https://en.wikipedia.org"
 
+# Global counter to keep track of how many pages had exceptions that were unable to be loaded
+failure_counter = 0
 
 def prepare_full_url(href: str) -> str:
 	if href.startswith("/"):
@@ -91,6 +95,7 @@ def filter_wikipedia_a_links(a: BeautifulSoup):
 	# Ignore urls about categories, "Category:"
 	# Ignore urls about the quality of the articles for now, "Talk:"
 	# TODO: for now, ignore non-wikipedia urls
+	# and not is_metadata_page(a["href"]) \
 	return a.has_attr("href") and a.get_text().lower().find("edit") == -1 \
 	and a.get_text().lower().find("improve this article") == -1 \
 	and a["href"].find("File:") == -1 \
@@ -103,7 +108,6 @@ def filter_wikipedia_a_links(a: BeautifulSoup):
 	and a["href"].find("User:") == -1 \
 	and a["href"].find("User_talk:") == -1 \
 	and a["href"].find("Special:Contributions") == -1 \
-	and not is_metadata_page(a["href"]) \
 	and not a["href"].endswith(".svg") \
 	and not a["href"].endswith(".jpg") \
 	and not a["href"].endswith(".png") \
@@ -116,6 +120,7 @@ def filter_wikipedia_a_links(a: BeautifulSoup):
 
 
 def accepted_url(url: str):
+	# and not is_metadata_page(url) \
 	return url.find("File:") == -1 \
 	and url.find("Wikipedia:") == -1 \
 	and url.find("Template:") == -1 \
@@ -127,7 +132,6 @@ def accepted_url(url: str):
 	and url.find("User_talk:") == -1 \
 	and url.find("Special:Contributions") == -1 \
 	and url.lower().find("edit") == -1 \
-	and not is_metadata_page(url) \
 	and not url.endswith(".svg") \
 	and not url.endswith(".jpg") \
 	and not url.endswith(".png") \
@@ -138,57 +142,154 @@ def accepted_url(url: str):
 	and not (url.startswith("http") and url.find("wikipedia.org") == -1)
 
 
-def explore_page(name: str, href: str, seen_urls: list, data_path: str, logger: io.TextIOWrapper):
+def get_headers_hierarchy(page: wikipedia.WikipediaPage):
+	# Attempt to get a hierarchy of headers
+	response = None
+	retry = 3
+	while (response is None):
+		if (retry == 0):
+			# Can't load page
+			print("3 tries. Unable to fetch/get the page for headers hierarchy. Returning empty list")
+			return []
+		try:
+			response = fetch_html_from_url(page.url)
+			html = BeautifulSoup(response.content, "html.parser")
+		except Exception as e:
+			print(f"Exception: {e}. Sleep for 300 seconds (5 minutes)...")
+			page = None
+			time.sleep(300)
+			retry -= 1
+
+	# Get the main content div
+	overall_div = get_wikipedia_page_main_content(html)
+	# TODO: handle when overall_div is None
+	if overall_div is None:
+		overall_div = get_wikipedia_body_content(html)
+	# If overall_div still none, then return
+	if overall_div is None:
+		print("Unable to get body content of page for headeres hierarchy. Returnig empty list")
+		return []
+
+	# Sometimes there's no "[edit]" in the header, need to handle that case
+	all_h = overall_div.find_all(re.compile('^h[1-6]$'))
+	header_strs_only = []
+	header_map_list = []
+	# Include the title in header_map_list to handle first text written out to file
+	header_map_list.append((title, []))
+	prev_h2 = ""
+	prev_h3 = ""
+	prev_h4 = ""
+	prev_h5 = ""
+	for elem in all_h:
+		index = elem.get_text().find("[edit]")
+		if index == -1:
+			key = elem.get_text().strip()
+		else:
+			key = elem.get_text()[:index].strip()
+		# each header in to the list in a tuple, with a list of its parents
+		header_strs_only.append(key)
+		if elem.name == "h2":
+			# No parents for h2, since h1 is the title
+			prev_h2 = key
+			header_map_list.append((key, []))	
+		elif elem.name == "h3":
+			# One parent, h2
+			prev_h3 = key
+			header_map_list.append((key, [prev_h2]))
+		elif elem.name == "h4":
+			# TWo parents, h2 and h3
+			prev_h4 = key
+			header_map_list.append((key, [prev_h2, prev_h3]))
+		elif elem.name == "h5":
+			# Three parents, h2, h3, and h4
+			prev_h5 = key
+			header_map_list.append((key, [prev_h2, prev_h3, prev_h4]))
+		elif elem.name == "h6":
+			# Four parents: h2, h3, h4, and h5
+			header_map_list.append((key, [prev_h2, prev_h3, prev_h4, prev_h5]))
+	return header_map_list, header_strs_only
+
+
+def explore_page(name: str, seen_urls: list, data_path: str, logger: io.TextIOWrapper):
 	"""
 	Retrieve all the content on the page
 	Prevent duplicates by verifying it's not in the seen_urls list
 	writer: io.TextIOWrapper
 	"""
 	# Load the web page
-	full_url = prepare_full_url(href)
+	# full_url = prepare_full_url(href)
 
 	# Try loading page 3 times with 3 second sleep. If not, then log as page that didn't get scraped
-	response = None
+	page = None
 	retry = 3
-	while (response is None):
+	while (page is None):
 		if retry == 0:
 			# Can't scrape this page, log it and return
-			logger.write("$$$$$$$$$$$$$$ Retried 3 times, unable to scrape page: " + full_url + "\n")
-			print(f"Retried 3 times, unable to scrape page {full_url}. Returning")
+			logger.write("$$$$$$$$$$$$$$ Retried 3 times, unable to scrape page: " + name + "\n")
+			print(f"Retried 3 times, unable to scrape page {name}. Returning")
+			failure_counter += 1
 			return
 		try:
-			response = fetch_html_from_url(full_url)
-			html = BeautifulSoup(response.content, "html.parser")
+			# response = fetch_html_from_url(full_url)
+			# html = BeautifulSoup(response.content, "html.parser")
+			page = wikipedia.page(name)
+		except DisambiguationError as e:
+			# Page is a disambiguation page
+			e1 = f"DisambiguationError for {name}. Trying with auto_suggest set to false...\n"
+			print(e1)
+			logger.write(e1)
+			try:
+				page = wikipedia.page(name, auto_suggest=False)
+			except Exception as f:
+				error = f"Error: {f}. This page: {name}, is a disambiguation page. Returning...\n"
+				logger.write(error)
+				print(error)
+				return
+		except PageError as e:
+			# Page doesn't exist, however sometimes this error is due to auto_suggest being true
+			# Try calling again with auto_suggest set to false
+			e1 = f"Page error for {name}. Trying with auto_suggest set to false...\n"
+			print(e1)
+			logger.write(e1)
+			try:
+				page = wikipedia.page(name, auto_suggest=False)
+			except Exception as f:
+				error = f"Error: {f}. This page: {name}, doesn't exist. Returning...\n"
+				logger.write(error)
+				print(error)
+				return
 		except Exception as e:
-			print(f"Exception: {e}. Sleep for 30 seconds...")
-			response = None
-			time.sleep(30)
+			print(f"Exception: {e}. Sleep for 300 seconds (5 minutes)...")
+			page = None
+			time.sleep(300)
 			retry -= 1
 
 	# Wait 3 seconds between each request
 	# time.sleep(3)
 	# If url redirected to a previously seen url, then return. No need to explore this page
-	if identify_redirecting_urls(seen_urls, response) or href in seen_urls or not accepted_url(response.url):
+	# redirect check identify_redirecting_urls(seen_urls, response)
+	if page.url in seen_urls or not accepted_url(page.url):
 		print(f"*********Redirected or already seen url or should be filtered out. Returning***************")
 		logger.write(f"*********Redirected or already seen url or should be filtered out. Returning***************\n")
 		return
 
 	# Mark this url as seen
-	seen_urls.append(href)
-	print("Exploring url: ", full_url)
+	seen_urls.append(page.url)
+	print("Exploring url: ", page.url)
 	print("seen urls list: ", seen_urls)
-	logger.write("Exploring url: " + full_url + "\n")
+	logger.write("Exploring url: " + page.url + "\n")
 	logger.write("seen urls list: " + str(seen_urls) + "\n")
 
 	# Get the wikipedia page visible title
-	title = get_wikipedia_page_title(html)
-	if title is None:
-		title = get_wikipedia_first_heading(html)
-	# Get the main content div
-	overall_div = get_wikipedia_page_main_content(html)
-	# TODO: handle when overall_div is None
-	if overall_div is None:
-		overall_div = get_wikipedia_body_content(html)
+	title = page.title
+	# title = get_wikipedia_page_title(html)
+	# if title is None:
+	# 	title = get_wikipedia_first_heading(html)
+	# # Get the main content div
+	# overall_div = get_wikipedia_page_main_content(html)
+	# # TODO: handle when overall_div is None
+	# if overall_div is None:
+	# 	overall_div = get_wikipedia_body_content(html)
 
 	# If the page doesn't ever mention "law" or "legal", then treat as unrelated content and skip the page
 	# Note that sometimes some things are in b tag for bold...
@@ -198,15 +299,14 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str, logger: 
 	# print(visible_text)
 
 	# If overall_div is still None, then can't scrape this page
-	if overall_div is None:
-		logger.write("overall_div is None. Returning...\n")
-		print("overall_div is None. Returning")
-		return
+	# if overall_div is None:
+	# 	logger.write("overall_div is None. Returning...\n")
+	# 	print("overall_div is None. Returning")
+	# 	return
 
 	# Create new text file for this article
-	if title is None:
+	if title is None or title == "":
 		# Can't find title
-		# raise Exception("Title couldn't be found for article!")
 		logger.write("Title couldn't be found for article! Returning\n")
 		print("Title couldn't be found for article!")
 		return
@@ -215,25 +315,15 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str, logger: 
 	# Set any header type tags to be the "topic" and the text within to be the description
 	# Separate topic and description with a tab "\t"
 
-	overall_visible_str_cat = u" ".join(overall_div.strings)
+	# overall_visible_str_cat = u" ".join(overall_div.strings)
 	# Remove all double spaces, replace with single space
-	overall_visible_str_cat = overall_visible_str_cat.replace("  ", " ")
+	# overall_visible_str_cat = overall_visible_str_cat.replace("  ", " ")
 	# print(overall_visible_str_cat)
+	overall_visible_str_cat = page.content
 
 	containsLaw = False
 	# This won't work since the term "notes" can show up earlier, not just at the header
 	# Should have at least 2 of these terms to pass
-	# notes_idx = overall_visible_str_cat.lower().find("notes")
-	# references_idx = overall_visible_str_cat.lower().find("references")
-	# if notes_idx == -1 and references_idx != -1:
-	# 	idx = references_idx
-	# elif notes_idx != -1 and references_idx == -1:
-	# 	idx = notes_idx
-	# elif notes_idx != -1 and references_idx != -1:
-	# 	idx = min(notes_idx, references_idx)
-	# else:
-	# idx = len(overall_visible_str_cat)
-	# print("Idx to check if article is about law: " + str(idx))
 	law_check = overall_visible_str_cat.lower().find("law") != -1
 	legal_check = overall_visible_str_cat.lower().find("legal") != -1
 	statute_check = overall_visible_str_cat.lower().find("statute") != -1
@@ -276,8 +366,8 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str, logger: 
 		containsLaw = True
 
 	if not containsLaw:
-		print(f"Does not contain law or legal content: {full_url} \n")
-		logger.write(f"Does not contain law or legal content: {full_url} \n")
+		print(f"Does not contain law or legal content: {page.url} \n")
+		logger.write(f"Does not contain law or legal content: {page.url} \n")
 		return
 
 	# Replace spaces in article with underscore, replace / with hyphen
@@ -286,82 +376,38 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str, logger: 
 		writer = open(article_path + "_SeenUrls" + str(len(seen_urls)) + ".txt", "w")
 	else:
 		writer = open(article_path + ".txt", "w")
-
-	# ul for bulleted unordered list, ol for ordered list, dl for description list
-	# Go through all children in the overall_div
 	print("\n")
-	# final_output = ""
-	# for t in overall_div.find_all(string=True):
-	# 	if (tag_visible(t)):
-	# 		print(f"line: {t.get_text()} , and tag: {t.name}")
-	# 		# final_output += t.get_text() + " "
-	# 	else:
-	# 		print("not visible")
-	# print(final_output)
 
 	# Find all headers, creating a list of headers where each element is a tuple of (header, list of parents)
-	# Sometimes there's no "[edit]" in the header, need to handle that case
-	headers_have_edit = False
-	all_h = overall_div.find_all(re.compile('^h[1-6]$'))
-	header_strs_only = []
-	header_map_list = []
-	# Include the title in header_map_list to handle first text written out to file
-	header_map_list.append((title, []))
+	# header_map_list, header_strs_only = get_headers_hierarchy(page)
+	# print("\n")
+	# print("List of headers: " + str(header_map_list))
+	print("From wikipediaPage sections for headers: " + str(page.sections))
+	# logger.write("\nList of headers: " + str(header_map_list) + "\n")
+	logger.write("From wikipediaPage sections for headers: " + str(page.sections) + "\n")
+
+	# Ignore info in tables(?)
+	# table_strings = []
+	# all_tables = overall_div.find_all("table")
+	# for tbody in all_tables:
+	# 	# print("&&&&&&&&&&&&&&&&&&&Table string&&&&&&&&&&&&&&&&&")
+	# 	table_str = u" ".join(tbody.strings)
+	# 	table_str = table_str.replace("  ", " ").replace("\n", " ").strip()
+	# 	# print(table_str)
+	# 	logger.write("&&&&&&&&&&&&&&&&&&&Table string&&&&&&&&&&&&&&&&&\n")
+	# 	logger.write(table_str + "\n")
+	# 	table_strings.append(table_str)
+
+	# Ignore info in figures
+	header = title
+	# hdr_index = 0 # Headers must be found in order, otherwise it's not a header
+	description = ""
 	prev_h2 = ""
 	prev_h3 = ""
 	prev_h4 = ""
 	prev_h5 = ""
-	for elem in all_h:
-		index = elem.get_text().find("[edit]")
-		if index == -1:
-			key = elem.get_text().strip()
-		else:
-			headers_have_edit = True
-			key = elem.get_text()[:index].strip()
-		# each header in to the list in a tuple, with a list of its parents
-		header_strs_only.append(key)
-		if elem.name == "h2":
-			# No parents for h2, since h1 is the title
-			prev_h2 = key
-			header_map_list.append((key, []))	
-		elif elem.name == "h3":
-			# One parent, h2
-			prev_h3 = key
-			header_map_list.append((key, [prev_h2]))
-		elif elem.name == "h4":
-			# TWo parents, h2 and h3
-			prev_h4 = key
-			header_map_list.append((key, [prev_h2, prev_h3]))
-		elif elem.name == "h5":
-			# Three parents, h2, h3, and h4
-			prev_h5 = key
-			header_map_list.append((key, [prev_h2, prev_h3, prev_h4]))
-		elif elem.name == "h6":
-			# Four parents: h2, h3, h4, and h5
-			header_map_list.append((key, [prev_h2, prev_h3, prev_h4, prev_h5]))
-			
-	# print(all_h)
-	print("\n")
-	print("List of headers: " + str(header_map_list))
-	logger.write("\nList of headers: " + str(header_map_list) + "\n")
+	prev_h6 = ""
 
-	# Ignore info in tables(?)
-	table_strings = []
-	all_tables = overall_div.find_all("table")
-	for tbody in all_tables:
-		# print("&&&&&&&&&&&&&&&&&&&Table string&&&&&&&&&&&&&&&&&")
-		table_str = u" ".join(tbody.strings)
-		table_str = table_str.replace("  ", " ").replace("\n", " ").strip()
-		# print(table_str)
-		logger.write("&&&&&&&&&&&&&&&&&&&Table string&&&&&&&&&&&&&&&&&\n")
-		logger.write(table_str + "\n")
-		table_strings.append(table_str)
-
-	# TODO: ignore info in figures?
-
-	header = title
-	hdr_index = 0 # Headers must be found in order, otherwise it's not a header
-	description = ""
 	num = len(overall_visible_str_cat.split("\n"))
 	print(f"Number of tokens split by newline: {num}")
 	logger.write(f"Number of tokens split by newline: {num}\n")
@@ -372,50 +418,164 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str, logger: 
 	for text in overall_visible_str_cat.split("\n"):
 		print("line: " + text)
 		logger.write("line: " + text + "\n")
-		if text.find("[ edit ]") != -1 or text.strip() in header_strs_only:
-			if hdr_index == len(header_strs_only):
-				print("Went through all headers, continue")
-				logger.write("Went through all headeres, continue\n")
-				description += text + " "
-				continue
-			print("found header...")
-			logger.write("found header...\n")
-			
-			if text.strip() != header_strs_only[hdr_index] \
-			and text[:text.find("[ edit ]")].strip() != header_strs_only[hdr_index]:
-				print(f"Wrong order, this is not a header: {text.strip()}")
-				logger.write(f"Wrong order, this is not a header: {text.strip()}\n")
-				description += text + " "
-				continue
+		if text.find("====== ") != -1:
+			# found h6 header
+			print(f"found h6 header {text}")
+			logger.write(f"found h6 header {text}\n")
 
-			# This is a header
-			# Find all parents if it is a subheader
-			assert(header_map_list[hdr_index][0] == header)
 			total_header = ""
-			for h in header_map_list[hdr_index][1]:
-				total_header += h + " - "
-			total_header += header
+			if prev_h2 != "":
+				total_header += prev_h2
+			if prev_h3 != "":
+				total_header += " - " + prev_h3
+			if prev_h4 != "":
+				total_header += " - " + prev_h4
+			if prev_h5 != "":
+				total_header += " - " + prev_h5
+			if prev_h6 != "":
+				total_header += " - " + prev_h6
+			if total_header == "":
+				total_header += header
+			writer.write(total_header + "\t" + description.strip() + "\n")
+			# Reset
+			header = text.replace("===", "").strip()
+			prev_h6 = header
+			description = ""
+		elif text.find("===== ") != -1:
+			# found h5 header
+			print(f"found h5 header {text}")
+			logger.write(f"found h5 header {text}\n")
+
+			total_header = ""
+			if prev_h2 != "":
+				total_header += prev_h2
+			if prev_h3 != "":
+				total_header += " - " + prev_h3
+			if prev_h4 != "":
+				total_header += " - " + prev_h4
+			if prev_h5 != "":
+				total_header += " - " + prev_h5
+			if prev_h6 != "":
+				total_header += " - " + prev_h6
+			if total_header == "":
+				total_header += header
+			writer.write(total_header + "\t" + description.strip() + "\n")
+			# Reset
+			header = text.replace("===", "").strip()
+			prev_h5 = header
+			prev_h6 = ""
+			description = ""
+		elif text.find("==== ") != -1:
+			# found h4 header
+			print(f"found h4 header {text}")
+			logger.write(f"found h4 header {text}\n")
+
+			total_header = ""
+			if prev_h2 != "":
+				total_header += prev_h2
+			if prev_h3 != "":
+				total_header += " - " + prev_h3
+			if prev_h4 != "":
+				total_header += " - " + prev_h4
+			if prev_h5 != "":
+				total_header += " - " + prev_h5
+			if prev_h6 != "":
+				total_header += " - " + prev_h6
+			if total_header == "":
+				total_header += header
+			writer.write(total_header + "\t" + description.strip() + "\n")
+			# Reset
+			header = text.replace("====", "").strip()
+			prev_h4 = header
+			prev_h5 = ""
+			prev_h6 = ""
+			description = ""
+		elif text.find("=== ") != -1:
+			# found h3 header
+			print(f"found h3 header {text}")
+			logger.write(f"found h3 header {text}\n")
+
+			total_header = ""
+			if prev_h2 != "":
+				total_header += prev_h2
+			if prev_h3 != "":
+				total_header += " - " + prev_h3
+			if prev_h4 != "":
+				total_header += " - " + prev_h4
+			if prev_h5 != "":
+				total_header += " - " + prev_h5
+			if prev_h6 != "":
+				total_header += " - " + prev_h6
+			if total_header == "":
+				total_header += header
+			writer.write(total_header + "\t" + description.strip() + "\n")
+			# Reset
+			header = text.replace("===", "").strip()
+			prev_h3 = header
+			prev_h4 = ""
+			prev_h5 = ""
+			prev_h6 = ""
+			description = ""
+		# if text.find("[ edit ]") != -1 or text.strip() in header_strs_only:
+		elif text.find("== ") != -1:
+			# h2 header
+			# if hdr_index == len(header_strs_only):
+			# 	print("Went through all headers, continue")
+			# 	logger.write("Went through all headeres, continue\n")
+			# 	description += text + " "
+			# 	continue
+			print(f"found h2 header {text}")
+			logger.write(f"found h2 header {text}\n")
+			
+			# if text.strip() != header_strs_only[hdr_index] \
+			# and text[:text.find("[ edit ]")].strip() != header_strs_only[hdr_index]:
+			# 	print(f"Wrong order, this is not a header: {text.strip()}")
+			# 	logger.write(f"Wrong order, this is not a header: {text.strip()}\n")
+			# 	description += text + " "
+			# 	continue
+
+			# This is a h2 header
+			# Find all parents if it is a subheader
+			# assert(header_map_list[hdr_index][0] == header)
+			total_header = ""
+			if prev_h2 != "":
+				total_header += prev_h2
+			if prev_h3 != "":
+				total_header += " - " + prev_h3
+			if prev_h4 != "":
+				total_header += " - " + prev_h4
+			if prev_h5 != "":
+				total_header += " - " + prev_h5
+			if prev_h6 != "":
+				total_header += " - " + prev_h6
+			if total_header == "":
+				total_header += header
 			
 			# Remove string from tables
 			# TODO: remove unicode characters?
 			# string_clean = re.sub(r"[^\x00-\x7F]+", "", description)
 			# print(string_clean)
-			for s in table_strings:
-				if description.find(s) != -1:
-					print(f"FOUND TABLE STRING IN DESCRIPTION: {s}")
-					logger.write(f"FOUND TABLE STRING IN DESCRIPTION: {s}\n")
-					description = description.replace(s, "")
+			# for s in table_strings:
+			# 	if description.find(s) != -1:
+			# 		print(f"FOUND TABLE STRING IN DESCRIPTION: {s}")
+			# 		logger.write(f"FOUND TABLE STRING IN DESCRIPTION: {s}\n")
+			# 		description = description.replace(s, "")
 
 			# Remove references in "[]"
-			# TODO: if the description is empty, like for a h2 without any subtext, don't include in the output file
-			description = re.sub(r"\[.*?\]", "", description)
+			# description = re.sub(r"\[.*?\]", "", description)
 			writer.write(total_header + "\t" + description.strip() + "\n")
-			if text.find("[ edit ]") != -1:
-				header = text[:text.find("[ edit ]")].strip() # substring up to [edit]
-			else:
-				header = text.strip()
+			# if text.find("[ edit ]") != -1:
+			# 	header = text[:text.find("[ edit ]")].strip() # substring up to [edit]
+			# else:
+			# 	header = text.strip()
+			header = text.replace("==", "").strip()
+			prev_h2 = header
+			prev_h3 = ""
+			prev_h4 = ""
+			prev_h5 = ""
+			prev_h6 = ""
 			description = ""
-			hdr_index += 1 # increment to next expected header
+			# hdr_index += 1 # increment to next expected header
 
 			# TODO: For now, ignore the info in "Notes" and "References" to external urls
 			# Also ignore "See Also" sections?
@@ -429,18 +589,30 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str, logger: 
 	# Write out the final header's info if didn't end earlier
 	if description != "":
 		print("Final header and description")
+		# for h in header_map_list[-1][1]:
+		# 	total_header += h + " - "
+		# total_header += header
 		total_header = ""
-		for h in header_map_list[-1][1]:
-			total_header += h + " - "
-		total_header += header
+		if prev_h2 != "":
+			total_header += prev_h2
+		if prev_h3 != "":
+			total_header += " - " + prev_h3
+		if prev_h4 != "":
+			total_header += " - " + prev_h4
+		if prev_h5 != "":
+			total_header += " - " + prev_h5
+		if prev_h6 != "":
+			total_header += " - " + prev_h6
+		if total_header == "":
+			total_header += header
 
-		for s in table_strings:
-			if description.find(s) != -1:
-				print(f"FOUND TABLE STRING IN DESCRIPTION: {s}")
-				logger.write(f"FOUND TABLE STRING IN DESCRIPTION: {s}\n")
-				description = description.replace(s, "")
+		# for s in table_strings:
+		# 	if description.find(s) != -1:
+		# 		print(f"FOUND TABLE STRING IN DESCRIPTION: {s}")
+		# 		logger.write(f"FOUND TABLE STRING IN DESCRIPTION: {s}\n")
+		# 		description = description.replace(s, "")
 
-		description = re.sub(r"\[.*?\]", "", description)
+		# description = re.sub(r"\[.*?\]", "", description)
 		writer.write(total_header + "\t" + description.strip() + "\n")
 
 	# for child in visible_texts:
@@ -495,28 +667,36 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str, logger: 
 	# return
 
 	# Get all tag a elements
-	neighbors = []
-	all_a = overall_div.find_all("a")
-	for a in all_a:
-		# Ignore "edit" urls and urls that point to part of the same page with "#"
-		# If the url redirects to a url that was seen before in seen_urls, ignore
-		# TODO: for now, ignore non-wikipedia urls
-		if filter_wikipedia_a_links(a) and not is_href_in_neighbors(remove_pound_from_urls(a["href"]), neighbors):
-			neighbors.append((a.get_text(), remove_pound_from_urls(a["href"])))
+	# neighbors = []
+	# all_a = overall_div.find_all("a")
+	# for a in all_a:
+	# 	# Ignore "edit" urls and urls that point to part of the same page with "#"
+	# 	# If the url redirects to a url that was seen before in seen_urls, ignore
+	# 	# TODO: for now, ignore non-wikipedia urls
+	# 	if filter_wikipedia_a_links(a) and not is_href_in_neighbors(remove_pound_from_urls(a["href"]), neighbors):
+	# 		neighbors.append((a.get_text(), remove_pound_from_urls(a["href"])))
 
 	# recurse through all the unseen tag a elements on this page
-	for n,link in neighbors:
-		if link not in seen_urls:
-			print("neighboring url to crawl through next: ", link)
-			logger.write("neighboring url to crawl through next: " + link + "\n\n")
-			explore_page(n, link, seen_urls, data_path, logger)
+	# for n,link in neighbors:
+	# 	if link not in seen_urls:
+	# 		print("neighboring url to crawl through next: ", link)
+	# 		logger.write("neighboring url to crawl through next: " + link + "\n\n")
+	# 		explore_page(n, link, seen_urls, data_path, logger)
+	for n in page.links:
+		print("neighboring page to crawl through next: ", n)
+		logger.write("neighboring page to crawl through next: " + n + "\n\n")
+		explore_page(n, seen_urls, data_path, logger)
 			
 
 
 def starting_run():
 	parser = argparse.ArgumentParser(description='Pass in starting URL for wikipedia law scraping')
-	parser.add_argument('--url', default=URL, type=str,
-	                    help='wikipedia URL to start scraping for law/legal content ')
+	parser.add_argument("--search_query", default="law/legal topics", type=str,
+		help="Query to search in wikipedia")
+	parser.add_argument("--num_results", default=100, type=int,
+		help="Max number of results to return from the search query")
+	# parser.add_argument('--url', default=URL, type=str,
+	#                     help='wikipedia URL to start scraping for law/legal content ')
 	parser.add_argument('--data_path', default="./scraped_wiki_article_data", type=str,
 		help="path to create an output directory to save the scraped files")
 	# parser.add_argument('--sum', dest='accumulate', action='store_const',
@@ -524,35 +704,38 @@ def starting_run():
 	#                     help='sum the integers (default: find the max)')
 	args = parser.parse_args()
 
-	resp = fetch_html_from_url(args.url)
-	html = BeautifulSoup(resp.content, "html.parser")
+	# Search for a topic in wikipedia (default limits to 10 results)
+	search_result = wikipedia.search(args.search_query, results=args.num_results)
+	# resp = fetch_html_from_url(args.url)
+	# html = BeautifulSoup(resp.content, "html.parser")
+	
 	# Get the wikipedia page visible title
-	title = get_wikipedia_page_title(html)
-	if title is None:
-		title = get_wikipedia_first_heading(html)
-	# Get the main content div
-	overall_div = get_wikipedia_page_main_content(html)
+	# title = get_wikipedia_page_title(html)
+	# if title is None:
+	# 	title = get_wikipedia_first_heading(html)
+	# # Get the main content div
+	# overall_div = get_wikipedia_page_main_content(html)
 
 	# Find all tag a for hrefs in the main content that will need to be crawled through
 	# The pages might have citations, where the href is pointing to somewhere in the same page with
 	# href="#cite note-1" for example which leads to non-wikipedia page.
 	# Also they have "edit" links, ignore those
-	all_a = overall_div.find_all("a")
+	# all_a = overall_div.find_all("a")
 
 	# Keeps track of (text in <a> tag, href)
-	unseen_urls = []
+	# unseen_urls = []
 
 	# Only keep track of href
 	seen_urls = []
 
-	for a in all_a:
-		# Ignore "edit" urls and urls that point to part of the same page with "#"
-		# TODO: for now, ignore non-wikipedia urls
-		# For urls that have # in the middle, not at the beginning, to point to a specific section of another page,
-		# remove anything after # to get the main link to the article
-		# print(a)
-		if (filter_wikipedia_a_links(a)):
-			unseen_urls.append((a.get_text(), remove_pound_from_urls(a["href"])))
+	# for a in all_a:
+	# 	# Ignore "edit" urls and urls that point to part of the same page with "#"
+	# 	# TODO: for now, ignore non-wikipedia urls
+	# 	# For urls that have # in the middle, not at the beginning, to point to a specific section of another page,
+	# 	# remove anything after # to get the main link to the article
+	# 	# print(a)
+	# 	if (filter_wikipedia_a_links(a)):
+	# 		unseen_urls.append((a.get_text(), remove_pound_from_urls(a["href"])))
 
 	# write content into a textfile output
 	data_path = args.data_path
@@ -563,17 +746,18 @@ def starting_run():
 	logger = open(log_path, "w")
 
 	# DFS
-	print(unseen_urls)
-	logger.write("unseen urls: " + str(unseen_urls) + "\n")
+	print(search_result)
+	logger.write("unseen links: " + str(search_result) + "\n")
 	count = 0
-	for url in unseen_urls:
-		# if (count == 10):
-		# 	break
+	for page_title in search_result:
+		if (count == 1):
+			break
 		# if url[1].lower().find("trust") == -1:
 		# 	continue
-		print("From starting page, exploring url: ", url)
-		logger.write("From starting page, exploring url: " + str(url) + "\n")
-		explore_page(url[0], url[1], seen_urls, data_path, logger)
+		print("From starting page, exploring page: ", page_title)
+		logger.write("From starting page, exploring page: " + str(page_title) + "\n")
+		# explore_page(url[0], url[1], seen_urls, data_path, logger)
+		explore_page(page_title, seen_urls, data_path, logger)
 		count += 1
 	print(f"!!!!!!!!!!!!!Finished!!!!!!!!!! Number of main urls searched through: {count}")
 	logger.write(f"!!!!!!!!!!!!!Finished!!!!!!!!!! Number of main urls searched through: {count}")
@@ -584,4 +768,4 @@ starting_run()
 # Logger
 # log_path = os.path.join("./scraped_wiki_article_data", "log.txt")
 # logger = open(log_path, "w")
-# explore_page("Hong Kong", "/wiki/Hong_Kong", [], "./scraped_wiki_article_data", logger)
+# explore_page("Hong Kong", [], "./scraped_wiki_article_data", logger)
