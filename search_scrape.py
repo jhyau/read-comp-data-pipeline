@@ -2,12 +2,15 @@ import argparse
 import io
 import re
 import os,sys
+import time
 from typing import Optional
 
 from beautifulsoup_tutorial.fetch import fetch_html_from_url
 from beautifulsoup_tutorial.scrape import *
 
 from bs4 import BeautifulSoup, Comment, NavigableString
+
+from requests.exceptions import ConnectionError
 
 URL = "https://en.wikipedia.org/wiki/List_of_areas_of_law"
 REDIRECTING_URL = "https://en.wikipedia.org/wiki/Corporate_compliance_law"
@@ -60,6 +63,22 @@ def remove_pound_from_urls(url: str):
 		return url
 
 
+def is_metadata_page(url: str):
+	"""
+	Find if url contains "/wiki/", then look for colon after that
+	"""
+	idx = url.find("/wiki/")
+	if idx == -1:
+		return False
+	else:
+		# Get substring starting from right after wiki
+		tokens_after_wiki = url[idx+6:].split("/")
+		if len(tokens_after_wiki) > 0 and tokens_after_wiki[0].find(":") != -1:
+			print(f"Found a metadata page!!! Filter out: {url}")
+			return True
+		else:
+			return False
+
 def filter_wikipedia_a_links(a: BeautifulSoup):
 	# Ignore a tags that don't have href
 	# Ignore "edit" urls and urls that point to part of the same page with "#"
@@ -77,9 +96,14 @@ def filter_wikipedia_a_links(a: BeautifulSoup):
 	and a["href"].find("File:") == -1 \
 	and a["href"].find("Wikipedia:") == -1 \
 	and a["href"].find("Template:") == -1 \
+	and a["href"].find("Template_talk:") == -1 \
 	and a["href"].find("Help:") == -1 \
 	and a["href"].find("Category:") == -1 \
 	and a["href"].find("Talk:") == -1 \
+	and a["href"].find("User:") == -1 \
+	and a["href"].find("User_talk:") == -1 \
+	and a["href"].find("Special:Contributions") == -1 \
+	and not is_metadata_page(a["href"]) \
 	and not a["href"].endswith(".svg") \
 	and not a["href"].endswith(".jpg") \
 	and not a["href"].endswith(".png") \
@@ -95,10 +119,15 @@ def accepted_url(url: str):
 	return url.find("File:") == -1 \
 	and url.find("Wikipedia:") == -1 \
 	and url.find("Template:") == -1 \
+	and url.find("Template_talk:") == -1 \
 	and url.find("Help:") == -1 \
 	and url.find("Category:") == -1 \
 	and url.find("Talk:") == -1 \
+	and url.find("User:") == -1 \
+	and url.find("User_talk:") == -1 \
+	and url.find("Special:Contributions") == -1 \
 	and url.lower().find("edit") == -1 \
+	and not is_metadata_page(url) \
 	and not url.endswith(".svg") \
 	and not url.endswith(".jpg") \
 	and not url.endswith(".png") \
@@ -117,11 +146,29 @@ def explore_page(name: str, href: str, seen_urls: list, data_path: str, logger: 
 	"""
 	# Load the web page
 	full_url = prepare_full_url(href)
-	response = fetch_html_from_url(full_url)
-	html = BeautifulSoup(response.content, "html.parser")
 
+	# Try loading page 3 times with 3 second sleep. If not, then log as page that didn't get scraped
+	response = None
+	retry = 3
+	while (response is None):
+		if retry == 0:
+			# Can't scrape this page, log it and return
+			logger.write("$$$$$$$$$$$$$$ Retried 3 times, unable to scrape page: " + full_url + "\n")
+			print(f"Retried 3 times, unable to scrape page {full_url}. Returning")
+			return
+		try:
+			response = fetch_html_from_url(full_url)
+			html = BeautifulSoup(response.content, "html.parser")
+		except Exception as e:
+			print(f"Exception: {e}. Sleep for 30 seconds...")
+			response = None
+			time.sleep(30)
+			retry -= 1
+
+	# Wait 3 seconds between each request
+	# time.sleep(3)
 	# If url redirected to a previously seen url, then return. No need to explore this page
-	if identify_redirecting_urls(seen_urls, response) or href in seen_urls or not accepted_url(resp.url):
+	if identify_redirecting_urls(seen_urls, response) or href in seen_urls or not accepted_url(response.url):
 		print(f"*********Redirected or already seen url or should be filtered out. Returning***************")
 		logger.write(f"*********Redirected or already seen url or should be filtered out. Returning***************\n")
 		return
@@ -537,4 +584,4 @@ starting_run()
 # Logger
 # log_path = os.path.join("./scraped_wiki_article_data", "log.txt")
 # logger = open(log_path, "w")
-# explore_page("Dáil Éireann (Irish Free State)", "/wiki/D%C3%A1il_%C3%89ireann_(Irish_Free_State)", [], "./scraped_wiki_article_data", logger)
+# explore_page("Hong Kong", "/wiki/Hong_Kong", [], "./scraped_wiki_article_data", logger)
