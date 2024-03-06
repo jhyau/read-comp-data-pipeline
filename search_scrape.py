@@ -19,9 +19,6 @@ REDIRECTING_URL = "https://en.wikipedia.org/wiki/Corporate_compliance_law"
 ANOTHER_URL = "https://en.wikipedia.org/wiki/Category:Corporate_law"
 BASE_URL = "https://en.wikipedia.org"
 
-# Global counter to keep track of how many pages had exceptions that were unable to be loaded
-failure_counter = 0
-
 def prepare_full_url(href: str) -> str:
 	if href.startswith("/"):
 		full_url = remove_pound_from_urls(BASE_URL + href)
@@ -210,7 +207,7 @@ def get_headers_hierarchy(page: wikipedia.WikipediaPage):
 	return header_map_list, header_strs_only
 
 
-def explore_page(name: str, seen_urls: list, data_path: str, logger: io.TextIOWrapper):
+def explore_page(name: str, seen_urls: list, data_path: str, logger: io.TextIOWrapper, failure_counter: int):
 	"""
 	Retrieve all the content on the page
 	Prevent duplicates by verifying it's not in the seen_urls list
@@ -258,6 +255,13 @@ def explore_page(name: str, seen_urls: list, data_path: str, logger: io.TextIOWr
 				logger.write(error)
 				print(error)
 				return
+		except RecursionError as err:
+			# Reached maximum depth of recursion for python (default 1000)
+			# Return and search through branch instead
+			error = f"RecursionError: {e}. Returning to previous level\n"
+			print(error)
+			logger.write(error)
+			return
 		except Exception as e:
 			print(f"Exception: {e}. Sleep for 300 seconds (5 minutes)...")
 			page = None
@@ -277,8 +281,10 @@ def explore_page(name: str, seen_urls: list, data_path: str, logger: io.TextIOWr
 	seen_urls.append(page.url)
 	print("Exploring url: ", page.url)
 	print("seen urls list: ", seen_urls)
+	print("Failure counter so far: " + str(failure_counter))
 	logger.write("Exploring url: " + page.url + "\n")
 	logger.write("seen urls list: " + str(seen_urls) + "\n")
+	logger.write(f"Failure counter so far: {failure_counter}\n")
 
 	# Get the wikipedia page visible title
 	title = page.title
@@ -330,13 +336,14 @@ def explore_page(name: str, seen_urls: list, data_path: str, logger: io.TextIOWr
 	legislative_check = overall_visible_str_cat.lower().find("legislative") != -1
 	judicial_check = overall_visible_str_cat.lower().find("judicial") != -1
 	legislation_check = overall_visible_str_cat.lower().find("legislation") != -1
+	legislature_check = overall_visible_str_cat.lower().find("legislature") != -1
 	gov_check = overall_visible_str_cat.lower().find("government") != -1
 	court_check = overall_visible_str_cat.lower().find("court") != -1
 	due_process = overall_visible_str_cat.lower().find("due process") != -1
 	jurisprudence = overall_visible_str_cat.lower().find("jurisprudence") != -1
 	jury = overall_visible_str_cat.lower().find("jury") != -1
 	checks = [law_check, legal_check, statute_check, legislative_check, judicial_check, legislation_check, gov_check, \
-	court_check, due_process, jurisprudence]
+	court_check, due_process, jurisprudence, legislature_check]
 
 	num_pass = sum(checks)
 	print(f"number of law checks that pass: {num_pass} / {len(checks)}")
@@ -347,6 +354,7 @@ def explore_page(name: str, seen_urls: list, data_path: str, logger: io.TextIOWr
 		print(f"Contains legislative: {legislative_check}")
 		print(f"Contains judicial: {judicial_check}")
 		print(f"Contains legislation: {legislation_check}")
+		print(f"Contains legislature: {legislature_check}")
 		print(f"Contains government: {gov_check}")
 		print(f"Contains court: {court_check}")
 		print(f"Contains due process: {due_process}")
@@ -358,6 +366,7 @@ def explore_page(name: str, seen_urls: list, data_path: str, logger: io.TextIOWr
 		logger.write(f"Contains legislative: {legislative_check}\n")
 		logger.write(f"Contains judicial: {judicial_check}\n")
 		logger.write(f"Contains legislation: {legislation_check}\n")
+		logger.write(f"Contains legislature: {legislature_check}\n")
 		logger.write(f"Contains government: {gov_check}\n")
 		logger.write(f"Contains court: {court_check}\n")
 		logger.write(f"Contains due process: {due_process}\n")
@@ -615,53 +624,6 @@ def explore_page(name: str, seen_urls: list, data_path: str, logger: io.TextIOWr
 		# description = re.sub(r"\[.*?\]", "", description)
 		writer.write(total_header + "\t" + description.strip() + "\n")
 
-	# for child in visible_texts:
-	# 	# print(child.name + ": " + child.get_text() + " parent: " + parent_name)
-	# 	print(str(type(child)) + " : " + str(child.name) + " : " + child.get_text())
-	# 	# Find if NavigableString
-	# 	if (isinstance(child, NavigableString)):
-	# 		print(child.name)
-	# 		print(str(child.string))
-	# 	# Find header
-	# 	if (str(child.name).startswith("h")):
-	# 		# write out the previous header and description before overwriting
-	# 		writer.write(header + "\t" + description + "\n")
-	# 		header = child.get_text()
-	# 		description = ""
-
-	# 		# If header is "References", then stop scraping page (considered to be done)
-	# 		# TODO: do we want to get references content?
-	# 		if header == "References" or header == "":
-	# 			break
-	# 	elif (str(child.extract().name) == "ul" or str(child.extract().name) == "ol" or str(child.extract().name) == "dl"):
-	# 		elems_str = get_list_elements(child)
-	# 		print(elems_str)
-	# 	# elif not tag_visible(child):
-	# 	# 	# Problem is parent of a BeautifulSoup object is defined as None
-	# 	# 	# https://beautiful-soup-4.readthedocs.io/en/latest/#parent
-	# 	# 	print("skipping this tag...")
-	# 	# 	# If the child's text is not visible content, ignore
-	# 	# 	continue
-	# 	elif (str(child.name) in ['style', 'script', 'head', 'meta', '[document]']):
-	# 		# Don't need to use any info here
-	# 		print("skipping")
-	# 		continue
-	# 	elif (isinstance(child, Comment)):
-	# 		# Don't store comment info
-	# 		print("skipping")
-	# 		continue
-	# 	else:
-	# 		description += child.get_text()
-	# 		# print("bulleted list detected!")
-	# 		# for gc in child.children:
-	# 		# 	print(gc)
-	# 		# 	print(gc.get_text())
-	# 		# 	# Even though docs say with .find() can't find a given tag, it returns None,
-	# 		# 	# seems like it actually returns -1
-	# 		# 	if (gc.find("a") is not None and gc.find("a") != -1):
-	# 		# 		# Found "a" tag in this element
-	# 		# 		print("href: " + gc.find("a")["href"])
-
 	# Close the writer
 	writer.close()
 	# return
@@ -685,7 +647,7 @@ def explore_page(name: str, seen_urls: list, data_path: str, logger: io.TextIOWr
 	for n in page.links:
 		print("neighboring page to crawl through next: ", n)
 		logger.write("neighboring page to crawl through next: " + n + "\n\n")
-		explore_page(n, seen_urls, data_path, logger)
+		explore_page(n, seen_urls, data_path, logger, failure_counter)
 			
 
 
@@ -695,6 +657,8 @@ def starting_run():
 		help="Query to search in wikipedia")
 	parser.add_argument("--num_results", default=100, type=int,
 		help="Max number of results to return from the search query")
+	parser.add_argument("--seen_urls", default=None, type=str,
+		help="Text file with a list of seen urls")
 	# parser.add_argument('--url', default=URL, type=str,
 	#                     help='wikipedia URL to start scraping for law/legal content ')
 	parser.add_argument('--data_path', default="./scraped_wiki_article_data", type=str,
@@ -725,8 +689,19 @@ def starting_run():
 	# Keeps track of (text in <a> tag, href)
 	# unseen_urls = []
 
-	# Only keep track of href
-	seen_urls = []
+	# Keep track of the seen urls from each page visit
+	if args.seen_urls is not None:
+		with open(args.seen_urls, "r") as f:
+			line = f.readline()
+			# Identify the start and end square brackets
+			start = line.find("[")+1 if line.find("[") != -1 else 0
+			end = line.find("]") if line.find("]") != -1 else len(line)
+			substr = line[start:end]
+			tokens = substr.split(",")
+			seen_urls = [x.replace("'", "").strip() for x in tokens]
+	else:
+		seen_urls = []
+
 
 	# for a in all_a:
 	# 	# Ignore "edit" urls and urls that point to part of the same page with "#"
@@ -746,6 +721,9 @@ def starting_run():
 	logger = open(log_path, "w")
 
 	# DFS
+	# counter to keep track of how many pages had exceptions that were unable to be loaded
+	failure_counter = 0
+
 	print(search_result)
 	logger.write("unseen links: " + str(search_result) + "\n")
 	count = 0
@@ -757,15 +735,23 @@ def starting_run():
 		print("From starting page, exploring page: ", page_title)
 		logger.write("From starting page, exploring page: " + str(page_title) + "\n")
 		# explore_page(url[0], url[1], seen_urls, data_path, logger)
-		explore_page(page_title, seen_urls, data_path, logger)
+		explore_page(page_title, seen_urls, data_path, logger, failure_counter)
 		count += 1
 	print(f"!!!!!!!!!!!!!Finished!!!!!!!!!! Number of main urls searched through: {count}")
 	logger.write(f"!!!!!!!!!!!!!Finished!!!!!!!!!! Number of main urls searched through: {count}")
+	print(f"Number of failure cases: {failure_counter} / {count}")
+	logger.write(f"Number of failure cases: {failure_counter} / {count}\n")
 	logger.close()
+
+	# Write seen_urls out to a text file
+	with open(os.path.join(data_path, "seen_urls.txt"), "w") as file:
+		file.write(str(seen_urls))
+	print("END")
 
 starting_run()
 
 # Logger
 # log_path = os.path.join("./scraped_wiki_article_data", "log.txt")
 # logger = open(log_path, "w")
-# explore_page("Hong Kong", [], "./scraped_wiki_article_data", logger)
+# counter = 0
+# explore_page("Hong Kong", [], "./scraped_wiki_article_data", logger, counter)
