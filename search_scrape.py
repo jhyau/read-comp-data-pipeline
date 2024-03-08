@@ -207,7 +207,7 @@ def get_headers_hierarchy(page: wikipedia.WikipediaPage):
 	return header_map_list, header_strs_only
 
 
-def explore_page(name: str, seen_urls: list, data_path: str, logger: io.TextIOWrapper, failure_counter: int):
+def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: str, logger: io.TextIOWrapper, failure_counter: int):
 	"""
 	Retrieve all the content on the page
 	Prevent duplicates by verifying it's not in the seen_urls list
@@ -216,7 +216,7 @@ def explore_page(name: str, seen_urls: list, data_path: str, logger: io.TextIOWr
 	# Load the web page
 	# full_url = prepare_full_url(href)
 
-	# Try loading page 3 times with 3 second sleep. If not, then log as page that didn't get scraped
+	# Try loading page 3 times with 5 minute sleep. If not, then log as page that didn't get scraped
 	page = None
 	retry = 3
 	while (page is None):
@@ -257,11 +257,12 @@ def explore_page(name: str, seen_urls: list, data_path: str, logger: io.TextIOWr
 				return
 		except RecursionError as err:
 			# Reached maximum depth of recursion for python (default 1000)
-			# Return and search through branch instead
-			error = f"RecursionError: {e}. Returning to previous level\n"
+			# To increase, can do sys.setrecursionlimit(n) but this is dangerous because it can lead to overflow/crash
+			# Raise exception to the recursive call and search through branch instead
+			error = f"RecursionError: {err}. Raising exception to return to previous level\n"
 			print(error)
 			logger.write(error)
-			return
+			raise err
 		except Exception as e:
 			print(f"Exception: {e}. Sleep for 300 seconds (5 minutes)...")
 			page = None
@@ -279,11 +280,14 @@ def explore_page(name: str, seen_urls: list, data_path: str, logger: io.TextIOWr
 
 	# Mark this url as seen
 	seen_urls.append(page.url)
-	print("Exploring url: ", page.url)
+	seen_page_titles.append(name)
 	print("seen urls list: ", seen_urls)
+	print("seen page titles list: ", seen_page_titles)
+	print("Exploring url: ", page.url)
 	print("Failure counter so far: " + str(failure_counter))
-	logger.write("Exploring url: " + page.url + "\n")
 	logger.write("seen urls list: " + str(seen_urls) + "\n")
+	logger.write("seen page titles list: " + str(seen_page_titles) + "\n")
+	logger.write("Exploring url: " + page.url + "\n")
 	logger.write(f"Failure counter so far: {failure_counter}\n")
 
 	# Get the wikipedia page visible title
@@ -293,7 +297,6 @@ def explore_page(name: str, seen_urls: list, data_path: str, logger: io.TextIOWr
 	# 	title = get_wikipedia_first_heading(html)
 	# # Get the main content div
 	# overall_div = get_wikipedia_page_main_content(html)
-	# # TODO: handle when overall_div is None
 	# if overall_div is None:
 	# 	overall_div = get_wikipedia_body_content(html)
 
@@ -301,8 +304,6 @@ def explore_page(name: str, seen_urls: list, data_path: str, logger: io.TextIOWr
 	# Note that sometimes some things are in b tag for bold...
 	# Retrieve all visible text from the page
 	# visible_text = text_from_html(response.content)
-	# print("=============visible text==============")
-	# print(visible_text)
 
 	# If overall_div is still None, then can't scrape this page
 	# if overall_div is None:
@@ -425,7 +426,7 @@ def explore_page(name: str, seen_urls: list, data_path: str, logger: io.TextIOWr
 	# Remove anything in brackets like "[<stuff>]", can be reference or something else for Wikipedia article
 	# https://stackoverflow.com/questions/22225006/how-to-replace-only-the-contents-within-brackets-using-regular-expressions
 	for text in overall_visible_str_cat.split("\n"):
-		print("line: " + text)
+		# print("line: " + text)
 		logger.write("line: " + text + "\n")
 		if text.find("====== ") != -1:
 			# found h6 header
@@ -645,9 +646,16 @@ def explore_page(name: str, seen_urls: list, data_path: str, logger: io.TextIOWr
 	# 		logger.write("neighboring url to crawl through next: " + link + "\n\n")
 	# 		explore_page(n, link, seen_urls, data_path, logger)
 	for n in page.links:
-		print("neighboring page to crawl through next: ", n)
-		logger.write("neighboring page to crawl through next: " + n + "\n\n")
-		explore_page(n, seen_urls, data_path, logger, failure_counter)
+		if n not in seen_page_titles:
+			print("neighboring page to crawl through next: ", n)
+			logger.write("neighboring page to crawl through next: " + n + "\n\n")
+			try:
+				explore_page(n, seen_urls, seen_page_titles, data_path, logger, failure_counter)
+			except RecursionError as err:
+				# The recurse has reached max recursion depth. Go back to previous depth
+				print(f"Recursion at max depth reached. Return to previous depth: {err}")
+				logger.write(f"Recursion at max depth reached. Return to previous depth: {err}\n")
+				return
 			
 
 
@@ -659,6 +667,10 @@ def starting_run():
 		help="Max number of results to return from the search query")
 	parser.add_argument("--seen_urls", default=None, type=str,
 		help="Text file with a list of seen urls")
+	parser.add_argument("--seen_page_titles", default=None, type=str,
+		help="Text file with a list of seen page titles")
+	parser.add_argument("--path_to_existing_articles", default=None, type=str,
+		help="Directory path to folder of already scraped articles")
 	# parser.add_argument('--url', default=URL, type=str,
 	#                     help='wikipedia URL to start scraping for law/legal content ')
 	parser.add_argument('--data_path', default="./scraped_wiki_article_data", type=str,
@@ -667,6 +679,7 @@ def starting_run():
 	#                     const=sum, default=max,
 	#                     help='sum the integers (default: find the max)')
 	args = parser.parse_args()
+	print(args)
 
 	# Search for a topic in wikipedia (default limits to 10 results)
 	search_result = wikipedia.search(args.search_query, results=args.num_results)
@@ -702,7 +715,6 @@ def starting_run():
 	else:
 		seen_urls = []
 
-
 	# for a in all_a:
 	# 	# Ignore "edit" urls and urls that point to part of the same page with "#"
 	# 	# TODO: for now, ignore non-wikipedia urls
@@ -716,9 +728,33 @@ def starting_run():
 	data_path = args.data_path
 	os.makedirs(data_path, exist_ok=True)
 
+	# Keep track of seen article titles from wikipedia.page.links
+	seen_page_titles = []
+	if args.seen_page_titles is not None:
+		with open(args.seen_page_titles, "r") as f:
+			line = f.readline()
+			# Identify the start and end square brackets
+			start = line.find("[")+1 if line.find("[") != -1 else 0
+			end = line.find("]") if line.find("]") != -1 else len(line)
+			substr = line[start:end]
+			tokens = substr.split(",")
+			seen_page_titles = [x.replace("'", "").strip() for x in tokens]
+	
+	if args.path_to_existing_articles is not None:
+		# Load the directory with files
+		files = os.listdir(args.path_to_existing_articles)
+		for file_name in files:
+			idx = file_name.find(".txt")
+			# Saved output files have spaces in article with underscore, replace / with hyphen
+			title = file_name[:idx].replace("_", " ")
+			# title2 = title + "_SeenUrls" + str(len(seen_urls)) + ".txt"
+			if title not in seen_page_titles:
+				seen_page_titles.append(title)
+				
 	# Logger
 	log_path = os.path.join(data_path, "log.txt")
 	logger = open(log_path, "w")
+	logger.write("args: " + str(args))
 
 	# DFS
 	# counter to keep track of how many pages had exceptions that were unable to be loaded
@@ -728,14 +764,19 @@ def starting_run():
 	logger.write("unseen links: " + str(search_result) + "\n")
 	count = 0
 	for page_title in search_result:
-		if (count == 1):
-			break
+		# if (count == 1):
+		# 	break
 		# if url[1].lower().find("trust") == -1:
 		# 	continue
 		print("From starting page, exploring page: ", page_title)
 		logger.write("From starting page, exploring page: " + str(page_title) + "\n")
 		# explore_page(url[0], url[1], seen_urls, data_path, logger)
-		explore_page(page_title, seen_urls, data_path, logger, failure_counter)
+		try:
+			explore_page(page_title, seen_urls, seen_page_titles, data_path, logger, failure_counter)
+		except Exception as err:
+			err_str = f"An error occurred at top level: {err}\n"
+			print(err_str)
+			logger.write(err_str)
 		count += 1
 	print(f"!!!!!!!!!!!!!Finished!!!!!!!!!! Number of main urls searched through: {count}")
 	logger.write(f"!!!!!!!!!!!!!Finished!!!!!!!!!! Number of main urls searched through: {count}")
@@ -746,6 +787,10 @@ def starting_run():
 	# Write seen_urls out to a text file
 	with open(os.path.join(data_path, "seen_urls.txt"), "w") as file:
 		file.write(str(seen_urls))
+	
+	# Write seen_page_titles out to a text file
+	with open(os.path.join(data_path, "seen_page_titles.txt"), "w") as f:
+		f.write(str(seen_page_titles))
 	print("END")
 
 starting_run()
@@ -754,4 +799,4 @@ starting_run()
 # log_path = os.path.join("./scraped_wiki_article_data", "log.txt")
 # logger = open(log_path, "w")
 # counter = 0
-# explore_page("Hong Kong", [], "./scraped_wiki_article_data", logger, counter)
+# explore_page("Hong Kong", [], [], "./scraped_wiki_article_data", logger, counter)
