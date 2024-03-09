@@ -307,11 +307,11 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 	seen_page_titles.append(name)
 	# print("seen urls list: ", seen_urls)
 	# print("seen page titles list: ", seen_page_titles)
-	print("Exploring url: ", page.url)
+	print(f"Exploring url: {page.url} at {str(current_time)}")
 	print("Failure counter so far: " + str(failure_counter))
 	logger.write("seen urls list: " + str(seen_urls) + "\n")
 	logger.write("seen page titles list: " + str(seen_page_titles) + "\n")
-	logger.write("Exploring url: " + page.url + "\n")
+	logger.write("Exploring url: " + page.url + " at " + str(current_time) +"\n")
 	logger.write(f"Failure counter so far: {failure_counter}\n")
 
 	# Get the wikipedia page visible title
@@ -714,7 +714,7 @@ def starting_run():
 		logger.write("From starting page, exploring page: " + str(page_title) + "\n")
 		# explore_page(url[0], url[1], seen_urls, data_path, logger)
 		try:
-			failure_counter, logger = explore_page(page_title, seen_urls, seen_page_titles, data_path, logger, failure_counter)
+			failure_counter, logger = explore_page(page_title, seen_urls, seen_page_titles, data_path, logger, start_time, failure_counter)
 		except Exception as err:
 			err_str = f"An error occurred at top level: {err}\n"
 			print(err_str)
