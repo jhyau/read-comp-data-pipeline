@@ -603,7 +603,7 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 			logger.write("neighboring page to crawl through next: " + n + "\n\n")
 			try:
 				# Need to update failure_counter and logger whenever new loggers are created
-				failure_counter, logger = explore_page(n, seen_urls, seen_page_titles, data_path, logger, failure_counter)
+				failure_counter, logger = explore_page(n, seen_urls, seen_page_titles, data_path, logger, current_time, failure_counter)
 			except RecursionError as err:
 				# The recurse has reached max recursion depth. Go back to previous depth
 				print(f"Recursion at max depth reached. Return to previous depth: {err}")
