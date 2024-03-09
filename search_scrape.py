@@ -3,6 +3,7 @@ import io
 import re
 import os,sys
 import time
+import datetime
 import wikipedia
 from typing import Optional
 
@@ -207,15 +208,21 @@ def get_headers_hierarchy(page: wikipedia.WikipediaPage):
 	return header_map_list, header_strs_only
 
 
-def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: str, logger: io.TextIOWrapper, failure_counter: int):
+def create_logger_name(date: datetime.datetime, data_path:str):
+	"""
+	Create logger path for the loggers during the DFS
+	"""
+	return os.path.join(data_path, f"{date.year}_{date.month}_{date.day}_{date.hour}_log.txt")
+
+
+def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: str, logger: io.TextIOWrapper, \
+	prev_datetime: datetime.datetime, failure_counter: int):
 	"""
 	Retrieve all the content on the page
 	Prevent duplicates by verifying it's not in the seen_urls list
 	writer: io.TextIOWrapper
 	"""
 	# Load the web page
-	# full_url = prepare_full_url(href)
-
 	# Try loading page 3 times with 5 minute sleep. If not, then log as page that didn't get scraped
 	page = None
 	retry = 3
@@ -224,8 +231,9 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 			# Can't scrape this page, log it and return
 			logger.write("$$$$$$$$$$$$$$ Retried 3 times, unable to scrape page: " + name + "\n")
 			print(f"Retried 3 times, unable to scrape page {name}. Returning")
-			failure_counter += 1
-			return
+			failure_counter += 1 # TODO: since this is an int, this won't update in recursive calls...
+			# Also maybe should keep track of the urls that have failed to load multiple times
+			return failure_counter, logger
 		try:
 			# response = fetch_html_from_url(full_url)
 			# html = BeautifulSoup(response.content, "html.parser")
@@ -241,7 +249,7 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 				error = f"Error: {f}. This page: {name}, is a disambiguation page. Returning...\n"
 				logger.write(error)
 				print(error)
-				return
+				return failure_counter, logger
 		except PageError as e:
 			# Page doesn't exist, however sometimes this error is due to auto_suggest being true
 			# Try calling again with auto_suggest set to false
@@ -254,7 +262,7 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 				error = f"Error: {f}. This page: {name}, doesn't exist. Returning...\n"
 				logger.write(error)
 				print(error)
-				return
+				return failure_counter, logger
 		except RecursionError as err:
 			# Reached maximum depth of recursion for python (default 1000)
 			# To increase, can do sys.setrecursionlimit(n) but this is dangerous because it can lead to overflow/crash
@@ -269,6 +277,22 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 			time.sleep(300)
 			retry -= 1
 
+	# Set up logger in hourly increments. Save each day's logs in its own subdirectory
+	current_time = datetime.datetime.now()
+	log_dir = os.path.join(data_path, "log")
+	current_log_dir = os.path.join(log_dir, f"{current_time.year}-{current_time.month}-{current_time.day}")
+	if prev_datetime.day != current_time.day or prev_datetime.month != current_time.month or prev_datetime.year != current_time.year:
+		# Create new directory for log of new day/month/year
+		print("Creating new logger subdirectory")
+		os.makedirs(current_log_dir, exist_ok=True)
+	
+	if prev_datetime.hour != current_time.hour:
+		# Close the logger and create a new one
+		logger.close()	
+		log_path = create_logger_name(current_time, current_log_dir)
+		print(f"New hour reached. Closing previous logger and creating new logger: {log_path}")
+		logger = open(log_path, "w")
+	
 	# Wait 3 seconds between each request
 	# time.sleep(3)
 	# If url redirected to a previously seen url, then return. No need to explore this page
@@ -276,13 +300,13 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 	if page.url in seen_urls or not accepted_url(page.url):
 		print(f"*********Redirected or already seen url or should be filtered out. Returning***************")
 		logger.write(f"*********Redirected or already seen url or should be filtered out. Returning***************\n")
-		return
+		return failure_counter, logger
 
 	# Mark this url as seen
 	seen_urls.append(page.url)
 	seen_page_titles.append(name)
-	print("seen urls list: ", seen_urls)
-	print("seen page titles list: ", seen_page_titles)
+	# print("seen urls list: ", seen_urls)
+	# print("seen page titles list: ", seen_page_titles)
 	print("Exploring url: ", page.url)
 	print("Failure counter so far: " + str(failure_counter))
 	logger.write("seen urls list: " + str(seen_urls) + "\n")
@@ -292,40 +316,22 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 
 	# Get the wikipedia page visible title
 	title = page.title
-	# title = get_wikipedia_page_title(html)
-	# if title is None:
-	# 	title = get_wikipedia_first_heading(html)
-	# # Get the main content div
-	# overall_div = get_wikipedia_page_main_content(html)
-	# if overall_div is None:
-	# 	overall_div = get_wikipedia_body_content(html)
 
 	# If the page doesn't ever mention "law" or "legal", then treat as unrelated content and skip the page
 	# Note that sometimes some things are in b tag for bold...
 	# Retrieve all visible text from the page
 	# visible_text = text_from_html(response.content)
 
-	# If overall_div is still None, then can't scrape this page
-	# if overall_div is None:
-	# 	logger.write("overall_div is None. Returning...\n")
-	# 	print("overall_div is None. Returning")
-	# 	return
-
 	# Create new text file for this article
 	if title is None or title == "":
 		# Can't find title
 		logger.write("Title couldn't be found for article! Returning\n")
 		print("Title couldn't be found for article!")
-		return
+		return failure_counter, logger
 
 	# Extract all the content on the page
 	# Set any header type tags to be the "topic" and the text within to be the description
 	# Separate topic and description with a tab "\t"
-
-	# overall_visible_str_cat = u" ".join(overall_div.strings)
-	# Remove all double spaces, replace with single space
-	# overall_visible_str_cat = overall_visible_str_cat.replace("  ", " ")
-	# print(overall_visible_str_cat)
 	overall_visible_str_cat = page.content
 
 	containsLaw = False
@@ -378,7 +384,7 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 	if not containsLaw:
 		print(f"Does not contain law or legal content: {page.url} \n")
 		logger.write(f"Does not contain law or legal content: {page.url} \n")
-		return
+		return failure_counter, logger
 
 	# Replace spaces in article with underscore, replace / with hyphen
 	article_path = os.path.join(data_path, title.replace(" ", "_").replace("/", "-"))
@@ -395,18 +401,6 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 	print("From wikipediaPage sections for headers: " + str(page.sections))
 	# logger.write("\nList of headers: " + str(header_map_list) + "\n")
 	logger.write("From wikipediaPage sections for headers: " + str(page.sections) + "\n")
-
-	# Ignore info in tables(?)
-	# table_strings = []
-	# all_tables = overall_div.find_all("table")
-	# for tbody in all_tables:
-	# 	# print("&&&&&&&&&&&&&&&&&&&Table string&&&&&&&&&&&&&&&&&")
-	# 	table_str = u" ".join(tbody.strings)
-	# 	table_str = table_str.replace("  ", " ").replace("\n", " ").strip()
-	# 	# print(table_str)
-	# 	logger.write("&&&&&&&&&&&&&&&&&&&Table string&&&&&&&&&&&&&&&&&\n")
-	# 	logger.write(table_str + "\n")
-	# 	table_strings.append(table_str)
 
 	# Ignore info in figures
 	header = title
@@ -529,20 +523,8 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 		# if text.find("[ edit ]") != -1 or text.strip() in header_strs_only:
 		elif text.find("== ") != -1:
 			# h2 header
-			# if hdr_index == len(header_strs_only):
-			# 	print("Went through all headers, continue")
-			# 	logger.write("Went through all headeres, continue\n")
-			# 	description += text + " "
-			# 	continue
 			print(f"found h2 header {text}")
 			logger.write(f"found h2 header {text}\n")
-			
-			# if text.strip() != header_strs_only[hdr_index] \
-			# and text[:text.find("[ edit ]")].strip() != header_strs_only[hdr_index]:
-			# 	print(f"Wrong order, this is not a header: {text.strip()}")
-			# 	logger.write(f"Wrong order, this is not a header: {text.strip()}\n")
-			# 	description += text + " "
-			# 	continue
 
 			# This is a h2 header
 			# Find all parents if it is a subheader
@@ -560,16 +542,6 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 				total_header += " - " + prev_h6
 			if total_header == "":
 				total_header += header
-			
-			# Remove string from tables
-			# TODO: remove unicode characters?
-			# string_clean = re.sub(r"[^\x00-\x7F]+", "", description)
-			# print(string_clean)
-			# for s in table_strings:
-			# 	if description.find(s) != -1:
-			# 		print(f"FOUND TABLE STRING IN DESCRIPTION: {s}")
-			# 		logger.write(f"FOUND TABLE STRING IN DESCRIPTION: {s}\n")
-			# 		description = description.replace(s, "")
 
 			# Remove references in "[]"
 			# description = re.sub(r"\[.*?\]", "", description)
@@ -616,12 +588,6 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 		if total_header == "":
 			total_header += header
 
-		# for s in table_strings:
-		# 	if description.find(s) != -1:
-		# 		print(f"FOUND TABLE STRING IN DESCRIPTION: {s}")
-		# 		logger.write(f"FOUND TABLE STRING IN DESCRIPTION: {s}\n")
-		# 		description = description.replace(s, "")
-
 		# description = re.sub(r"\[.*?\]", "", description)
 		writer.write(total_header + "\t" + description.strip() + "\n")
 
@@ -629,33 +595,20 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 	writer.close()
 	# return
 
-	# Get all tag a elements
-	# neighbors = []
-	# all_a = overall_div.find_all("a")
-	# for a in all_a:
-	# 	# Ignore "edit" urls and urls that point to part of the same page with "#"
-	# 	# If the url redirects to a url that was seen before in seen_urls, ignore
-	# 	# TODO: for now, ignore non-wikipedia urls
-	# 	if filter_wikipedia_a_links(a) and not is_href_in_neighbors(remove_pound_from_urls(a["href"]), neighbors):
-	# 		neighbors.append((a.get_text(), remove_pound_from_urls(a["href"])))
-
-	# recurse through all the unseen tag a elements on this page
-	# for n,link in neighbors:
-	# 	if link not in seen_urls:
-	# 		print("neighboring url to crawl through next: ", link)
-	# 		logger.write("neighboring url to crawl through next: " + link + "\n\n")
-	# 		explore_page(n, link, seen_urls, data_path, logger)
+	# Find neighbors from list of wikipedia page links on the current page, excluding metadata pages
+	logger.write(f"Upcoming neighbors: {str(page.links)}\n")
 	for n in page.links:
 		if n not in seen_page_titles:
 			print("neighboring page to crawl through next: ", n)
 			logger.write("neighboring page to crawl through next: " + n + "\n\n")
 			try:
-				explore_page(n, seen_urls, seen_page_titles, data_path, logger, failure_counter)
+				# Need to update failure_counter and logger whenever new loggers are created
+				failure_counter, logger = explore_page(n, seen_urls, seen_page_titles, data_path, logger, failure_counter)
 			except RecursionError as err:
 				# The recurse has reached max recursion depth. Go back to previous depth
 				print(f"Recursion at max depth reached. Return to previous depth: {err}")
 				logger.write(f"Recursion at max depth reached. Return to previous depth: {err}\n")
-				return
+				return failure_counter, logger
 			
 
 
@@ -685,13 +638,6 @@ def starting_run():
 	search_result = wikipedia.search(args.search_query, results=args.num_results)
 	# resp = fetch_html_from_url(args.url)
 	# html = BeautifulSoup(resp.content, "html.parser")
-	
-	# Get the wikipedia page visible title
-	# title = get_wikipedia_page_title(html)
-	# if title is None:
-	# 	title = get_wikipedia_first_heading(html)
-	# # Get the main content div
-	# overall_div = get_wikipedia_page_main_content(html)
 
 	# Find all tag a for hrefs in the main content that will need to be crawled through
 	# The pages might have citations, where the href is pointing to somewhere in the same page with
@@ -700,8 +646,6 @@ def starting_run():
 	# all_a = overall_div.find_all("a")
 
 	# Keeps track of (text in <a> tag, href)
-	# unseen_urls = []
-
 	# Keep track of the seen urls from each page visit
 	if args.seen_urls is not None:
 		with open(args.seen_urls, "r") as f:
@@ -714,15 +658,6 @@ def starting_run():
 			seen_urls = [x.replace("'", "").strip() for x in tokens]
 	else:
 		seen_urls = []
-
-	# for a in all_a:
-	# 	# Ignore "edit" urls and urls that point to part of the same page with "#"
-	# 	# TODO: for now, ignore non-wikipedia urls
-	# 	# For urls that have # in the middle, not at the beginning, to point to a specific section of another page,
-	# 	# remove anything after # to get the main link to the article
-	# 	# print(a)
-	# 	if (filter_wikipedia_a_links(a)):
-	# 		unseen_urls.append((a.get_text(), remove_pound_from_urls(a["href"])))
 
 	# write content into a textfile output
 	data_path = args.data_path
@@ -752,13 +687,22 @@ def starting_run():
 				seen_page_titles.append(title)
 				
 	# Logger
-	log_path = os.path.join(data_path, "log.txt")
+	# Split logger files by datetime so it doesn't all output to one gigantic log
+	start_time = datetime.datetime.now()
+	log_dir = os.path.join(data_path, "log")
+	os.makedirs(log_dir, exist_ok=True)
+	current_log_dir = os.path.join(log_dir, f"{start_time.year}-{start_time.month}-{start_time.day}")
+	os.makedirs(current_log_dir, exist_ok=True)
+
+	log_path = os.path.join(current_log_dir, f"start_{start_time.year}_{start_time.month}_{start_time.day}_{start_time.hour}_log.txt")
 	logger = open(log_path, "w")
 	logger.write("args: " + str(args))
+	logger.write("start time: " + str(start_time) + "\n")
 
 	# DFS
 	# counter to keep track of how many pages had exceptions that were unable to be loaded
 	failure_counter = 0
+	# depth = 0
 
 	print(search_result)
 	logger.write("unseen links: " + str(search_result) + "\n")
@@ -766,23 +710,31 @@ def starting_run():
 	for page_title in search_result:
 		# if (count == 1):
 		# 	break
-		# if url[1].lower().find("trust") == -1:
-		# 	continue
 		print("From starting page, exploring page: ", page_title)
 		logger.write("From starting page, exploring page: " + str(page_title) + "\n")
 		# explore_page(url[0], url[1], seen_urls, data_path, logger)
 		try:
-			explore_page(page_title, seen_urls, seen_page_titles, data_path, logger, failure_counter)
+			failure_counter, logger = explore_page(page_title, seen_urls, seen_page_titles, data_path, logger, failure_counter)
 		except Exception as err:
 			err_str = f"An error occurred at top level: {err}\n"
 			print(err_str)
-			logger.write(err_str)
+			# logger.write(err_str)
 		count += 1
-	print(f"!!!!!!!!!!!!!Finished!!!!!!!!!! Number of main urls searched through: {count}")
-	logger.write(f"!!!!!!!!!!!!!Finished!!!!!!!!!! Number of main urls searched through: {count}")
-	print(f"Number of failure cases: {failure_counter} / {count}")
-	logger.write(f"Number of failure cases: {failure_counter} / {count}\n")
 	logger.close()
+	# Final logger
+	# TODO: split logger files by datetime so it doesn't all output to one gigantic log
+	end_time = datetime.datetime.now()
+	current_log_dir = os.path.join(log_dir, f"{end_time.year}-{end_time.month}-{end_time.day}")
+	os.makedirs(current_log_dir, exist_ok=True)
+
+	end_log_path = os.path.join(current_log_dir, f"end_{end_time.year}_{end_time.month}_{end_time.day}_{end_time.hour}_log.txt")
+	end_logger = open(end_log_path, "w")
+	end_logger.write("end time: " + str(end_time) + "\n")
+	print(f"!!!!!!!!!!!!!Finished!!!!!!!!!! Number of main urls searched through: {count}")
+	end_logger.write(f"Finished!!!!!!!!!! Number of main urls searched through: {count}")
+	print(f"Number of failure cases: {failure_counter} / {count}")
+	end_logger.write(f"Number of failure cases: {failure_counter} / {count}\n")
+	end_logger.close()
 
 	# Write seen_urls out to a text file
 	with open(os.path.join(data_path, "seen_urls.txt"), "w") as file:
@@ -799,4 +751,4 @@ starting_run()
 # log_path = os.path.join("./scraped_wiki_article_data", "log.txt")
 # logger = open(log_path, "w")
 # counter = 0
-# explore_page("Hong Kong", [], [], "./scraped_wiki_article_data", logger, counter)
+# explore_page("Hong Kong", [], [], "./scraped_wiki_article_data", logger, datetime.datetime.now(), counter)
