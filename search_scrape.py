@@ -271,6 +271,16 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 			print(error)
 			logger.write(error)
 			raise err
+		except ValueError as e:
+			# ValueError: I/O operation on closed file.
+			# open the current datetime as logger
+			current_time = datetime.datetime.now()
+			e_str = f"ValueError in recursive call: {e} at {str(current_time)}. Open logger at current time\n"
+			log_dir = os.path.join(data_path, "log")
+			current_log_dir = os.path.join(log_dir, f"{current_time.year}-{current_time.month}-{current_time.day}")
+			logger = open(current_log_dir, "a")
+			print(e_str)
+			logger.write(e_str)
 		except Exception as e:
 			print(f"Exception: {e}. Sleep for 300 seconds (5 minutes)...")
 			page = None
@@ -287,11 +297,14 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 		os.makedirs(current_log_dir, exist_ok=True)
 	
 	if prev_datetime.hour != current_time.hour:
+		# Only write out seen urls and seen page titles at the end of the current hour's log once
+		logger.write("seen urls list: " + str(seen_urls) + "\n")
+		logger.write("seen page titles list: " + str(seen_page_titles) + "\n")
 		# Close the logger and create a new one
 		logger.close()	
 		log_path = create_logger_name(current_time, current_log_dir)
 		print(f"New hour reached. Closing previous logger and creating new logger: {log_path}")
-		logger = open(log_path, "w")
+		logger = open(log_path, "a")
 	
 	# Wait 3 seconds between each request
 	# time.sleep(3)
@@ -309,8 +322,6 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 	# print("seen page titles list: ", seen_page_titles)
 	print(f"Exploring url: {page.url} at {str(current_time)}")
 	print("Failure counter so far: " + str(failure_counter))
-	logger.write("seen urls list: " + str(seen_urls) + "\n")
-	logger.write("seen page titles list: " + str(seen_page_titles) + "\n")
 	logger.write("Exploring url: " + page.url + " at " + str(current_time) +"\n")
 	logger.write(f"Failure counter so far: {failure_counter}\n")
 
@@ -710,15 +721,26 @@ def starting_run():
 	for page_title in search_result:
 		# if (count == 1):
 		# 	break
-		print("From starting page, exploring page: ", page_title)
-		logger.write("From starting page, exploring page: " + str(page_title) + "\n")
 		# explore_page(url[0], url[1], seen_urls, data_path, logger)
 		try:
+			print("From starting page, exploring page: ", page_title)
+			logger.write("From starting page, exploring page: " + str(page_title) + "\n")
 			failure_counter, logger = explore_page(page_title, seen_urls, seen_page_titles, data_path, logger, start_time, failure_counter)
+		except ValueError as e:
+			# ValueError: I/O operation on closed file.
+			# open the current datetime as logger
+			current_time = datetime.datetime.now()
+			e_str = f"ValueError: {e} at {str(current_time)}. Open logger at current time\n"
+			log_dir = os.path.join(data_path, "log")
+			current_log_dir = os.path.join(log_dir, f"{current_time.year}-{current_time.month}-{current_time.day}")
+			logger = open(current_log_dir, "a")
+			print(e_str)
+			logger.write(e_str)
 		except Exception as err:
 			err_str = f"An error occurred at top level: {err}\n"
 			print(err_str)
-			# logger.write(err_str)
+			logger.write(err_str)
+
 		count += 1
 	logger.close()
 	# Final logger
