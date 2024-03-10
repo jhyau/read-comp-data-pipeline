@@ -245,7 +245,7 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 			print(f"Retried 3 times, unable to scrape page {name}. Returning")
 			failure_counter += 1 # TODO: since this is an int, this won't update in recursive calls...
 			# Also maybe should keep track of the urls that have failed to load multiple times
-			return failure_counter, logger
+			return failure_counter, logger, ""
 		try:
 			# response = fetch_html_from_url(full_url)
 			# html = BeautifulSoup(response.content, "html.parser")
@@ -261,7 +261,7 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 				error = f"Error: {f}. This page: {name}, is a disambiguation page. Returning...\n"
 				logger.write(error)
 				print(error)
-				return failure_counter, logger
+				return failure_counter, logger, ""
 		except PageError as e:
 			# Page doesn't exist, however sometimes this error is due to auto_suggest being true
 			# Try calling again with auto_suggest set to false
@@ -274,7 +274,7 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 				error = f"Error: {f}. This page: {name}, doesn't exist. Returning...\n"
 				logger.write(error)
 				print(error)
-				return failure_counter, logger
+				return failure_counter, logger, ""
 		except RecursionError as err:
 			# Reached maximum depth of recursion for python (default 1000)
 			# To increase, can do sys.setrecursionlimit(n) but this is dangerous because it can lead to overflow/crash
@@ -286,7 +286,8 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 				current_log_dir = create_log_dir(current_time, data_path)
 				logger = open(current_log_dir, "a")
 			logger.write(error)
-			raise err
+			return failure_counter, logger, error
+			#raise err
 		except ValueError as e:
 			# ValueError: I/O operation on closed file.
 			# open the current datetime as logger
@@ -328,7 +329,7 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 	if page.url in seen_urls or not accepted_url(page.url):
 		print(f"*********Redirected or already seen url or should be filtered out. Returning***************")
 		logger.write(f"*********Redirected or already seen url or should be filtered out. Returning***************\n")
-		return failure_counter, logger
+		return failure_counter, logger, ""
 
 	# Mark this url as seen
 	seen_urls.append(page.url)
@@ -353,7 +354,7 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 		# Can't find title
 		logger.write("Title couldn't be found for article! Returning\n")
 		print("Title couldn't be found for article!")
-		return failure_counter, logger
+		return failure_counter, logger, ""
 
 	# Extract all the content on the page
 	# Set any header type tags to be the "topic" and the text within to be the description
@@ -410,7 +411,7 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 	if not containsLaw:
 		print(f"Does not contain law or legal content: {page.url} \n")
 		logger.write(f"Does not contain law or legal content: {page.url} \n")
-		return failure_counter, logger
+		return failure_counter, logger, ""
 
 	# Replace spaces in article with underscore, replace / with hyphen
 	article_path = os.path.join(data_path, title.replace(" ", "_").replace("/", "-"))
@@ -628,21 +629,33 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 			if logger.closed:
 				current_time = datetime.datetime.now()
 				current_log_dir = create_log_dir(current_time, data_path)
-				logger = open(current_log_dir, "a")
+				current_log_path = create_logger_name(current_time, current_log_dir)
+				logger = open(current_log_path, "a")
 			print("neighboring page to crawl through next: ", n)
 			logger.write("neighboring page to crawl through next: " + n + "\n\n")
 			try:
 				# Need to update failure_counter and logger whenever new loggers are created
-				failure_counter, logger = explore_page(n, seen_urls, seen_page_titles, data_path, logger, current_time, failure_counter)
+				failure_counter, logger, msg = explore_page(n, seen_urls, seen_page_titles, data_path, logger, current_time, failure_counter)
+				if msg.find("RecursionError") != -1:
+					# Return to previous depth
+					print(f"Found RecursionError msg, max depth reached. Return to previous depth: {msg}")
+					if logger.closed:
+						# If logger is closed, open it again
+						current_log_dir = create_log_dir(current_time, data_path)
+						current_log_path = create_logger_name(current_time, current_log_dir)
+						logger = open(current_log_path, "a")
+					logger.write(f"Found RecursionError, max depth reached. Return to previous depth: {msg}\n")
+					return failure_counter, logger, ""
 			except RecursionError as err:
 				# The recurse has reached max recursion depth. Go back to previous depth
 				print(f"Recursion at max depth reached. Return to previous depth: {err}")
 				if logger.closed:
 					# If logger is closed, open it again
 					current_log_dir = create_log_dir(current_time, data_path)
-					logger = open(current_log_dir, "a")
+					current_log_path = create_logger_name(current_time, current_log_dir)
+					logger = open(current_log_path, "a")
 				logger.write(f"Recursion at max depth reached. Return to previous depth: {err}\n")
-				return failure_counter, logger
+				return failure_counter, logger, f"RecursionError: {err}. Recursion at max depth reached. Return to previous"
 			
 
 
@@ -751,9 +764,10 @@ def starting_run():
 				# If logger is closed, open it again
 				current_time = datetime.datetime.now()
 				current_log_dir = create_log_dir(current_time, data_path)
-				logger = open(current_log_dir, "a")
+				current_log_path = create_logger_name(current_time, current_log_dir)
+				logger = open(current_log_path, "a")
 			logger.write("From starting page, exploring page: " + str(page_title) + "\n")
-			failure_counter, logger = explore_page(page_title, seen_urls, seen_page_titles, data_path, logger, start_time, failure_counter)
+			failure_counter, logger, msg = explore_page(page_title, seen_urls, seen_page_titles, data_path, logger, start_time, failure_counter)
 		except ValueError as e:
 			# ValueError: I/O operation on closed file.
 			# open the current datetime as logger
@@ -762,7 +776,8 @@ def starting_run():
 			print(e_str)
 			if logger.closed:
 				current_log_dir = create_log_dir(current_time, data_path)
-				logger = open(current_log_dir, "a")
+				current_log_path = create_logger_name(current_time, current_log_dir)
+				logger = open(current_log_path, "a")
 			logger.write(e_str)
 		except Exception as err:
 			err_str = f"An error occurred at top level: {err}\n"
@@ -771,9 +786,9 @@ def starting_run():
 				# If logger is closed, open it again
 				current_time = datetime.datetime.now()
 				current_log_dir = create_log_dir(current_time, data_path)
-				logger = open(current_log_dir, "a")
+				current_log_path = create_logger_name(current_time, current_log_dir)
+				logger = open(current_log_path, "a")
 			logger.write(err_str)
-
 		count += 1
 	
 	if not logger.closed:
