@@ -703,6 +703,7 @@ def starting_run():
 			substr = line[start:end]
 			tokens = substr.split(",")
 			seen_urls = [x.replace("'", "").strip() for x in tokens]
+		print(f"Have seen urls loaded. Total num: {len(seen_urls)}")
 	else:
 		seen_urls = []
 
@@ -732,7 +733,8 @@ def starting_run():
 			# title2 = title + "_SeenUrls" + str(len(seen_urls)) + ".txt"
 			if title not in seen_page_titles:
 				seen_page_titles.append(title)
-				
+	print(f"Total number of seen page titles: {len(seen_page_titles)}")
+	
 	# Logger
 	# Split logger files by datetime so it doesn't all output to one gigantic log
 	start_time = datetime.datetime.now()
