@@ -215,6 +215,12 @@ def create_logger_name(date: datetime.datetime, data_path:str):
 	return os.path.join(data_path, f"{date.year}_{date.month}_{date.day}_{date.hour}_log.txt")
 
 
+def create_log_dir(current_time: datetime.datetime, data_path: str):
+	log_dir = os.path.join(data_path, "log")
+	current_log_dir = os.path.join(log_dir, f"{current_time.year}-{current_time.month}-{current_time.day}")
+	return current_log_dir
+
+
 def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: str, logger: io.TextIOWrapper, \
 	prev_datetime: datetime.datetime, failure_counter: int):
 	"""
@@ -222,6 +228,12 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 	Prevent duplicates by verifying it's not in the seen_urls list
 	writer: io.TextIOWrapper
 	"""
+	# Check if logger is open
+	if logger.closed:
+		print("Logger is closed. Opening up logger again")
+		current_time = datetime.datetime.now()
+		current_log_dir = create_log_dir(current_time, data_path)
+		logger = open(current_log_dir, "a")
 	# Load the web page
 	# Try loading page 3 times with 5 minute sleep. If not, then log as page that didn't get scraped
 	page = None
@@ -269,6 +281,10 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 			# Raise exception to the recursive call and search through branch instead
 			error = f"RecursionError: {err}. Raising exception to return to previous level\n"
 			print(error)
+			if logger.closed:
+				current_time = datetime.datetime.now()
+				current_log_dir = create_log_dir(current_time, data_path)
+				logger = open(current_log_dir, "a")
 			logger.write(error)
 			raise err
 		except ValueError as e:
@@ -276,9 +292,9 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 			# open the current datetime as logger
 			current_time = datetime.datetime.now()
 			e_str = f"ValueError in recursive call: {e} at {str(current_time)}. Open logger at current time\n"
-			log_dir = os.path.join(data_path, "log")
-			current_log_dir = os.path.join(log_dir, f"{current_time.year}-{current_time.month}-{current_time.day}")
-			logger = open(current_log_dir, "a")
+			if logger.closed:
+				current_log_dir = create_log_dir(current_time, data_path)
+				logger = open(current_log_dir, "a")
 			print(e_str)
 			logger.write(e_str)
 		except Exception as e:
@@ -289,8 +305,7 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 
 	# Set up logger in hourly increments. Save each day's logs in its own subdirectory
 	current_time = datetime.datetime.now()
-	log_dir = os.path.join(data_path, "log")
-	current_log_dir = os.path.join(log_dir, f"{current_time.year}-{current_time.month}-{current_time.day}")
+	current_log_dir = create_log_dir(current_time, data_path)
 	if prev_datetime.day != current_time.day or prev_datetime.month != current_time.month or prev_datetime.year != current_time.year:
 		# Create new directory for log of new day/month/year
 		print("Creating new logger subdirectory")
@@ -301,7 +316,7 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 		logger.write("seen urls list: " + str(seen_urls) + "\n")
 		logger.write("seen page titles list: " + str(seen_page_titles) + "\n")
 		# Close the logger and create a new one
-		logger.close()	
+		logger.close()
 		log_path = create_logger_name(current_time, current_log_dir)
 		print(f"New hour reached. Closing previous logger and creating new logger: {log_path}")
 		logger = open(log_path, "a")
@@ -610,6 +625,10 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 	logger.write(f"Upcoming neighbors: {str(page.links)}\n")
 	for n in page.links:
 		if n not in seen_page_titles:
+			if logger.closed:
+				current_time = datetime.datetime.now()
+				current_log_dir = create_log_dir(current_time, data_path)
+				logger = open(current_log_dir, "a")
 			print("neighboring page to crawl through next: ", n)
 			logger.write("neighboring page to crawl through next: " + n + "\n\n")
 			try:
@@ -618,6 +637,10 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 			except RecursionError as err:
 				# The recurse has reached max recursion depth. Go back to previous depth
 				print(f"Recursion at max depth reached. Return to previous depth: {err}")
+				if logger.closed:
+					# If logger is closed, open it again
+					current_log_dir = create_log_dir(current_time, data_path)
+					logger = open(current_log_dir, "a")
 				logger.write(f"Recursion at max depth reached. Return to previous depth: {err}\n")
 				return failure_counter, logger
 			
@@ -702,7 +725,7 @@ def starting_run():
 	start_time = datetime.datetime.now()
 	log_dir = os.path.join(data_path, "log")
 	os.makedirs(log_dir, exist_ok=True)
-	current_log_dir = os.path.join(log_dir, f"{start_time.year}-{start_time.month}-{start_time.day}")
+	current_log_dir = create_log_dir(start_time, data_path)
 	os.makedirs(current_log_dir, exist_ok=True)
 
 	log_path = os.path.join(current_log_dir, f"start_{start_time.year}_{start_time.month}_{start_time.day}_{start_time.hour}_log.txt")
@@ -724,6 +747,11 @@ def starting_run():
 		# explore_page(url[0], url[1], seen_urls, data_path, logger)
 		try:
 			print("From starting page, exploring page: ", page_title)
+			if logger.closed:
+				# If logger is closed, open it again
+				current_time = datetime.datetime.now()
+				current_log_dir = create_log_dir(current_time, data_path)
+				logger = open(current_log_dir, "a")
 			logger.write("From starting page, exploring page: " + str(page_title) + "\n")
 			failure_counter, logger = explore_page(page_title, seen_urls, seen_page_titles, data_path, logger, start_time, failure_counter)
 		except ValueError as e:
@@ -731,18 +759,26 @@ def starting_run():
 			# open the current datetime as logger
 			current_time = datetime.datetime.now()
 			e_str = f"ValueError: {e} at {str(current_time)}. Open logger at current time\n"
-			log_dir = os.path.join(data_path, "log")
-			current_log_dir = os.path.join(log_dir, f"{current_time.year}-{current_time.month}-{current_time.day}")
-			logger = open(current_log_dir, "a")
 			print(e_str)
+			if logger.closed:
+				current_log_dir = create_log_dir(current_time, data_path)
+				logger = open(current_log_dir, "a")
 			logger.write(e_str)
 		except Exception as err:
 			err_str = f"An error occurred at top level: {err}\n"
 			print(err_str)
+			if logger.closed:
+				# If logger is closed, open it again
+				current_time = datetime.datetime.now()
+				current_log_dir = create_log_dir(current_time, data_path)
+				logger = open(current_log_dir, "a")
 			logger.write(err_str)
 
 		count += 1
-	logger.close()
+	
+	if not logger.closed:
+		# Close logger if it's open
+		logger.close()
 	# Final logger
 	# TODO: split logger files by datetime so it doesn't all output to one gigantic log
 	end_time = datetime.datetime.now()
