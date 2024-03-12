@@ -221,7 +221,7 @@ def create_log_dir(current_time: datetime.datetime, data_path: str):
 	return current_log_dir
 
 
-def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: str, logger: io.TextIOWrapper, \
+def explore_page(name: str, seen_urls: list, seen_page_titles: set, data_path: str, logger: io.TextIOWrapper, \
 	prev_datetime: datetime.datetime, failure_counter: int):
 	"""
 	Retrieve all the content on the page
@@ -334,9 +334,9 @@ def explore_page(name: str, seen_urls: list, seen_page_titles: list, data_path: 
 
 	# Mark this url as seen
 	seen_urls.append(page.url)
-	seen_page_titles.append(name)
+	seen_page_titles.add(name)
 	# print("seen urls list: ", seen_urls)
-	# print("seen page titles list: ", seen_page_titles)
+	# print("seen page titles set: ", seen_page_titles)
 	print(f"Exploring url: {page.url} at {str(current_time)}")
 	print("Failure counter so far: " + str(failure_counter))
 	logger.write("Exploring url: " + page.url + " at " + str(current_time) +"\n")
@@ -670,7 +670,7 @@ def starting_run():
 		help="Text file with a list of seen urls")
 	parser.add_argument("--seen_page_titles", default=None, type=str,
 		help="Text file with a list of seen page titles")
-	parser.add_argument("--path_to_existing_articles", default=None, type=str,
+	parser.add_argument("--path_to_existing_articles", default=None, type=str, nargs="*",
 		help="Directory path to folder of already scraped articles")
 	# parser.add_argument('--url', default=URL, type=str,
 	#                     help='wikipedia URL to start scraping for law/legal content ')
@@ -726,14 +726,16 @@ def starting_run():
 	
 	if args.path_to_existing_articles is not None:
 		# Load the directory with files
-		files = os.listdir(args.path_to_existing_articles)
-		for file_name in files:
-			idx = file_name.find(".txt")
-			# Saved output files have spaces in article with underscore, replace / with hyphen
-			title = file_name[:idx].replace("_", " ")
-			# title2 = title + "_SeenUrls" + str(len(seen_urls)) + ".txt"
-			if title not in seen_page_titles:
-				seen_page_titles.append(title)
+		for path in args.path_to_existing_articles:
+			files = os.listdir(path)
+			for file_name in files:
+				idx = file_name.find(".txt")
+				# Saved output files have spaces in article with underscore, replace / with hyphen
+				title = file_name[:idx].replace("_", " ")
+				# title2 = title + "_SeenUrls" + str(len(seen_urls)) + ".txt"
+				if title not in seen_page_titles:
+					seen_page_titles.append(title)
+	seen_page_titles = set(seen_page_titles) # prevent duplicates
 	print(f"Total number of seen page titles: {len(seen_page_titles)}")
 	
 	# Logger
@@ -836,7 +838,7 @@ def bfs():
 		help="Text file with a list of seen urls")
 	parser.add_argument("--seen_page_titles", default=None, type=str,
 		help="Text file with a list of seen page titles")
-	parser.add_argument("--path_to_existing_articles", default=None, type=str,
+	parser.add_argument("--path_to_existing_articles", default=None, type=str, nargs="*",
 		help="Directory path to folder of already scraped articles")
 	parser.add_argument('--start_page', default=None, type=str,
 	                    help='wikipedia name page to start at')
@@ -877,14 +879,16 @@ def bfs():
 	
 	if args.path_to_existing_articles is not None:
 		# Load the directory with files
-		files = os.listdir(args.path_to_existing_articles)
-		for file_name in files:
-			idx = file_name.find(".txt")
-			# Saved output files have spaces in article with underscore, replace / with hyphen
-			title = file_name[:idx].replace("_", " ")
-			# title2 = title + "_SeenUrls" + str(len(seen_urls)) + ".txt"
-			if title not in seen_page_titles:
-				seen_page_titles.append(title)
+		for path in args.path_to_existing_articles:
+			files = os.listdir(path)
+			for file_name in files:
+				idx = file_name.find(".txt")
+				# Saved output files have spaces in article with underscore, replace / with hyphen
+				title = file_name[:idx].replace("_", " ")
+				# title2 = title + "_SeenUrls" + str(len(seen_urls)) + ".txt"
+				if title not in seen_page_titles:
+					seen_page_titles.append(title)
+	seen_page_titles = set(seen_page_titles) # remove duplicates
 	print(f"Total number of seen page titles: {len(seen_page_titles)}")
 	
 	# Logger
@@ -998,7 +1002,7 @@ def bfs():
 		if prev_datetime.hour != current_time.hour:
 			# Only write out seen urls and seen page titles at the end of the current hour's log once
 			logger.write("seen urls list: " + str(seen_urls) + "\n")
-			logger.write("seen page titles list: " + str(seen_page_titles) + "\n")
+			logger.write("seen page titles set: " + str(seen_page_titles) + "\n")
 			# Close the logger and create a new one
 			logger.close()
 			log_path = create_logger_name(current_time, current_log_dir)
@@ -1020,11 +1024,10 @@ def bfs():
 			print(f"Can't add anymore urls to seen_urls: {page.url}")
 		
 		try:
-			# If unable to add anymore items in to list
-			if name not in seen_page_titles:
-				seen_page_titles.append(name)
+			# If unable to add anymore items into set
+			seen_page_titles.add(name)
 		except Exception as error:
-			print(f"Unable to add anymore names to seen_page_titles list: {name}")
+			print(f"Unable to add anymore names to seen_page_titles set: {name}")
 		print(f"Exploring url: {page.url} at {str(current_time)}")
 		print("Failure counter so far: " + str(failure_counter))
 		logger.write("Exploring url: " + page.url + " at " + str(current_time) +"\n")
@@ -1313,7 +1316,6 @@ def bfs():
 		# Close logger if it's open
 		logger.close()
 	# Final logger
-	# TODO: split logger files by datetime so it doesn't all output to one gigantic log
 	end_time = datetime.datetime.now()
 	current_log_dir = os.path.join(log_dir, f"{end_time.year}-{end_time.month}-{end_time.day}")
 	os.makedirs(current_log_dir, exist_ok=True)
