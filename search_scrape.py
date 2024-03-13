@@ -917,6 +917,7 @@ def bfs():
 	# Counters
 	failure_counter = 0
 	count = 0
+	prev_datetime = datetime.datetime.now()
 
 	# BFS
 	while (unseen_links):
@@ -1310,6 +1311,8 @@ def bfs():
 		for n in page.links:
 			if n not in seen_page_titles:
 				unseen_links.append(n)
+		# update datetime
+		prev_datetime = current_time
 
 	# main while loop ended
 	if not logger.closed:
@@ -1338,9 +1341,9 @@ def bfs():
 		f.write(str(seen_page_titles))
 	print("BFS END")
 
+bfs()
 
-
-starting_run()
+#starting_run()
 
 # Logger
 # log_path = os.path.join("./scraped_wiki_article_data", "log.txt")
