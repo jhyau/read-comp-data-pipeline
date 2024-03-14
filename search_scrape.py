@@ -983,6 +983,8 @@ def bfs():
 						logger = open(current_log_dir, "a")
 					print(e_str)
 					logger.write(e_str)
+					page = None
+					retry -= 1
 				except Exception as e:
 					print(f"Exception: {e}. Sleep for 300 seconds (5 minutes)...")
 					page = None
@@ -1013,8 +1015,8 @@ def bfs():
 		# If url redirected to a previously seen url, then return. No need to explore this page
 		# redirect check identify_redirecting_urls(seen_urls, response)
 		if page.url in seen_urls or not accepted_url(page.url):
-			print(f"*********Redirected or already seen url or should be filtered out. Returning***************")
-			logger.write(f"*********Redirected or already seen url or should be filtered out. Returning***************\n")
+			print(f"*********Redirected or already seen url {page.url} or should be filtered out. Returning***************")
+			logger.write(f"*********Redirected or already seen url {page.url} or should be filtered out. Returning***************\n")
 			continue
 
 		# Mark this url as seen
