@@ -941,6 +941,12 @@ def bfs():
 		print(f"Number of unseen_links left: {len(unseen_links)}")
 		logger.write(f"Number of unseen_links left: {len(unseen_links)}\n")
 
+		# If max BFS depth is set, decrement whenever a level of search is done
+		if last_link_in_level is not None and name == last_link_in_level:
+			bfs_level_cap -= 1
+			print(f"Hit the last link in the current level: {name}. Decrementing bfs_level_cap: {bfs_level_cap}")
+			logger.write(f"Hit the last link in the current level: {name}. Decrementing bfs_level_cap: {bfs_level_cap}\n")
+
 		# Explore the page
 		# Load the web page
 		# Try loading page 3 times with 5 minute sleep. If not, then log as page that didn't get scraped
@@ -1342,15 +1348,20 @@ def bfs():
 			for n in page.links:
 				if n not in seen_page_titles:
 					unseen_links.append(n)
+			if last_link_in_level is not None and name == last_link_in_level:
+				last_link_in_level = unseen_links[-1]
+				print(f"Next last link in level: {last_link_in_level}")
+				logger.write(f"Next last link in level: {last_link_in_level}\n")
+		elif bfs_level_cap == 0 and name == last_link_in_level:
+			for n in page.links:
+				if n not in seen_page_titles:
+					unseen_links.append(n)
+			print(f"Last link in the last level: {name}. No more neighbors will be added after this")
+			logger.write(f"Last link in the last level: {name}. No more neighbors will be added after this\n")
+			bfs_level_cap -= 1 # This will be -1 now
 		else:
 			print("Hit BFS level cap, not adding additional neighbors")
 			logger.write("Hit BFS level cap, not adding additional neighbors")
-		# If max BFS depth is set, decrement whenever a level of search is done
-		if last_link_in_level is not None and name == last_link_in_level:
-			bfs_level_cap -= 1
-			last_link_in_level = unseen_links[-1]
-			print(f"Hit the last link in the current level. Decrementing bfs_level_cap: {bfs_level_cap}")
-			logger.write(f"Hit the last link in the current level. Decrementing bfs_level_cap: {bfs_level_cap}\n")
 		# update datetime
 		prev_datetime = current_time
 
