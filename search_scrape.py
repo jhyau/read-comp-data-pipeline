@@ -844,6 +844,8 @@ def bfs():
 	                    help='wikipedia name page to start at')
 	parser.add_argument('--data_path', default="./scraped_wiki_article_data", type=str,
 		help="path to create an output directory to save the scraped files")
+	parser.add_argument("--bfs_level", default=None, type=int,
+		help="max level of bfs depth")
 	args = parser.parse_args()
 	print(args)
 
@@ -914,6 +916,13 @@ def bfs():
 	print(unseen_links)
 	logger.write("unseen links: " + str(unseen_links) + "\n")
 
+	# Cap the level of BFS
+	bfs_level_cap = args.bfs_level
+	if bfs_level_cap is not None:
+		last_link_in_level = unseen_links[-1]
+	else:
+		last_link_in_level = None
+
 	# Counters
 	failure_counter = 0
 	count = 0
@@ -929,6 +938,8 @@ def bfs():
 			logger = open(current_log_dir, "a")
 		# Act as queue, pop off the oldest item first
 		name = unseen_links.pop(0)
+		print(f"Number of unseen_links left: {len(unseen_links)}")
+		logger.write(f"Number of unseen_links left: {len(unseen_links)}\n")
 
 		# Explore the page
 		# Load the web page
@@ -985,11 +996,25 @@ def bfs():
 					logger.write(e_str)
 					page = None
 					retry -= 1
+				except ConnectionError as e:
+					# Check if it's "Connection reset by peer". If so, then break and stop the scraping
+					if str(e).find("Connection reset by peer") != -1:
+						raise e
+					else:
+						print(f"ConnectionError: {e}. Sleep for 300 seconds (5 minutes)...")
+						page = None
+						time.sleep(300)
+						retry -= 1
 				except Exception as e:
 					print(f"Exception: {e}. Sleep for 300 seconds (5 minutes)...")
 					page = None
 					time.sleep(300)
 					retry -= 1
+		except ConnectionError as e:
+			# This must be a "Connection reset by peer" error. Break the loop
+			print(f"ConnectionError: {str(e)}. Breaking outer while search loop...")
+			logger.write(f"ConnectionError: {str(e)}. Breaking outer while search loop...")
+			break
 		except Exception as e:
 			# There was some error when trying to open the page. continue to next page
 			continue
@@ -1066,8 +1091,9 @@ def bfs():
 		due_process = overall_visible_str_cat.lower().find("due process") != -1
 		jurisprudence = overall_visible_str_cat.lower().find("jurisprudence") != -1
 		jury = overall_visible_str_cat.lower().find("jury") != -1
+		tribunal_check = overall_visible_str_cat.lower().find("tribunal") != -1
 		checks = [law_check, legal_check, statute_check, legislative_check, judicial_check, legislation_check, gov_check, \
-		court_check, due_process, jurisprudence, legislature_check, jury]
+		court_check, due_process, jurisprudence, legislature_check, jury, tribunal_check]
 
 		num_pass = sum(checks)
 		print(f"number of law checks that pass: {num_pass} / {len(checks)}")
@@ -1084,6 +1110,7 @@ def bfs():
 			print(f"Contains due process: {due_process}")
 			print(f"Contains jurisprudence: {jurisprudence}")
 			print(f"Contains jury: {jury}")
+			print(f"Contains tribunal: {tribunal_check}")
 			logger.write(f"Contains law: {law_check}\n")
 			logger.write(f"Contains legal: {legal_check}\n")
 			logger.write(f"Contains statute: {statute_check}\n")
@@ -1096,6 +1123,7 @@ def bfs():
 			logger.write(f"Contains due process: {due_process}\n")
 			logger.write(f"Contains jurisprudence: {jurisprudence}\n")
 			logger.write(f"Contains jury: {jury}\n")
+			logger.write(f"Contains tribunal: {tribunal_check}")
 			containsLaw = True
 
 		if not containsLaw:
@@ -1310,9 +1338,19 @@ def bfs():
 		logger.write(f"Upcoming neighbors: {str(page.links)}\n")
 
 		# Add unseen neighbors to queue
-		for n in page.links:
-			if n not in seen_page_titles:
-				unseen_links.append(n)
+		if bfs_level_cap is None or bfs_level_cap > 0:
+			for n in page.links:
+				if n not in seen_page_titles:
+					unseen_links.append(n)
+		else:
+			print("Hit BFS level cap, not adding additional neighbors")
+			logger.write("Hit BFS level cap, not adding additional neighbors")
+		# If max BFS depth is set, decrement whenever a level of search is done
+		if last_link_in_level is not None and name == last_link_in_level:
+			bfs_level_cap -= 1
+			last_link_in_level = unseen_links[-1]
+			print(f"Hit the last link in the current level. Decrementing bfs_level_cap: {bfs_level_cap}")
+			logger.write(f"Hit the last link in the current level. Decrementing bfs_level_cap: {bfs_level_cap}\n")
 		# update datetime
 		prev_datetime = current_time
 
