@@ -62,7 +62,7 @@ for file in all_files:
 							prompt += f", specifically related to {headers[i]}"
 						else:
 							prompt += f" under {headers[i]}"
-				if description != "":
+				if description.strip() != "":
 					# Make sure description is not empty
 					prompt += f" given this short description: {description}"
 				
