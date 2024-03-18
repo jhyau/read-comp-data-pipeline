@@ -20,6 +20,7 @@ Get set up locally in two steps:
 
 ### Environment Variables
 
+NOTE: No need to do this step for this repo to search and scrape. 
 Replace the value in **.env.example** with your value, and rename this file to **.env**:
 
 * `TARGET_URL`: An HTTP URL to scrape and display metadata from.
@@ -29,10 +30,20 @@ Replace the value in **.env.example** with your value, and rename this file to *
 Get up and running with `make deploy`:
 
 ```shell
-git clone https://github.com/hackersandslackers/beautifulsoup-tutorial.git
-cd beautifulsoup-tutorial
+git clone https://github.com/jhyau/read-comp-data-pipeline.git
+cd read-comp-data-pipeline
 make deploy
 ```
+
+### Update env
+
+To update the environment, add new dependencies to `pyproject.toml`. Then run `make update`
+
+## Main files
+
+To run web scraping, use `search_scrape.py`
+
+To run generation prompts through OpenAI, use `query_gpt.py`
 
 ------------------
 
