@@ -21,6 +21,8 @@ beautifulsoup4 = "*"
 python-dotenv = "*"
 wikipedia = '*'
 wikipedia-sections = '*'
+tqdm = '*'
+openai = '*'
 
 [tool.poetry.group.dev.dependencies]
 black = "*"
