@@ -20,11 +20,20 @@ parser.add_argument("--model", default="gpt-3.5-turbo", type=str,
 	help="Model to query")
 parser.add_argument('--data_path', default="./scraped_wiki_article_data", type=str,
 	help="path to directory of scraped files")
+parser.add_argument("--single_file", default=None, type=str,
+	help="Option to pass in a single file in data_path to prompt with instead of all files in the directory")
 args = parser.parse_args()
 print(args)
 
-all_files = os.listdir(args.data_path)
+file_count = 0
+if args.single_file is not None:
+	all_files = [args.single_file]
+else:
+	all_files = os.listdir(args.data_path)
+
 for file in all_files:
+	if file_count == 5:
+		break
 	line_num = 0
 	index = file.find(".txt")
 	title = file[:index].replace("_", " ")
@@ -72,6 +81,7 @@ for file in all_files:
 				print(response.choices[0].message.content)
 				# break
 			line_num += 1
-	break
+	file_count += 1
+	# break
 
 print(f"FINISHED QUERYING MODEL {args.model}")
