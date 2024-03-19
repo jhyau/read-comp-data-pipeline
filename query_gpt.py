@@ -51,7 +51,7 @@ for file in all_files:
 			if title_is_law or has_keyword(line, KEYWORDS):
 				header, description = line.split("\t")
 				print(f"Querying {args.model} with line: {line}")
-				prompt = f"Generate law topics under {title}"
+				prompt = f"Generate law topics under \"{title}\""
 
 				if line_num > 0:
 					# Not the first line
@@ -59,12 +59,12 @@ for file in all_files:
 					for i in range(len(headers)):
 						if i == len(headers) - 1:
 							# The most specfic subheader
-							prompt += f", specifically related to {headers[i]}"
+							prompt += f", specifically related to \"{headers[i]}\""
 						else:
-							prompt += f" under {headers[i]}"
+							prompt += f" under \"{headers[i]}\""
 				if description.strip() != "":
 					# Make sure description is not empty
-					prompt += f" given this short description: {description}"
+					prompt += f" given this short description: \"{description.strip()}\""
 				
 				# Query the model
 				print(f"Prompt: {prompt}")
